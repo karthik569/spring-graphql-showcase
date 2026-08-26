@@ -1,0 +1,18 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: spring-graphql-showcase
+  graphql:
+    graphiql:
+      enabled: true
+      path: /graphiql
+    cors:
+      allowed-origins: "*"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
