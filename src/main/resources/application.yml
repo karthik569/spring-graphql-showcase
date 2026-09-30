@@ -34,3 +34,9 @@ graphql:
     max-depth: 10
     max-complexity: 200
     max-query-length: 10000
+
+# Dev-only JWT settings: override the secret in any real deployment
+security:
+  jwt:
+    secret: change-me-in-production-this-secret-is-at-least-32-bytes
+    ttl: 3600s

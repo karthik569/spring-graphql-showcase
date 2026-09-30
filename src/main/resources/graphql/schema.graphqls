@@ -11,10 +11,17 @@ type Query {
 }
 
 type Mutation {
+    login(username: String!, password: String!): AuthPayload!
     addBook(input: BookInput!): Book!
     updateBook(id: ID!, input: BookUpdateInput!): Book!
     deleteBook(id: ID!): Boolean!
     updateStock(id: ID!, stock: Int!): Book! @deprecated(reason: "Use updateBook instead")
+}
+
+type AuthPayload {
+    accessToken: String!
+    tokenType: String!
+    expiresIn: Int!
 }
 
 type Subscription {
@@ -35,6 +42,7 @@ type Book implements Publication {
     pages: Int!
     price: Float!
     stock: Int!
+    costPrice: Float!
     author: Author
 }
 
@@ -71,6 +79,7 @@ type Author {
     id: ID!
     name: String!
     country: String!
+    email: String!
     books: [Book!]!
 }
 

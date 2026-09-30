@@ -73,6 +73,9 @@ class BookGraphQLIntegrationTest {
     record BookConnectionView(List<EdgeView> edges, PageInfoView pageInfo, int totalCount) {
     }
 
+    record AuthPayloadView(String accessToken, String tokenType, int expiresIn) {
+    }
+
     @Test
     void graphQlEndpointSpeaksJsonOverHttp() {
         webTestClient.post()
@@ -275,7 +278,7 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void addBookMutationCreatesAQueryableBook() {
-        BookView created = addBook("Cloud Native Java", 450, 59.0, 12, "author-1");
+        BookView created = addBook(testerFor("user", "password"), "Cloud Native Java", 450, 59.0, 12, "author-1");
 
         assertThat(created.id()).startsWith("book-");
         assertThat(created.title()).isEqualTo("Cloud Native Java");
@@ -299,9 +302,10 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void updateBookMutationPatchesOnlyProvidedFields() {
-        BookView created = addBook("Integration Update", 100, 10.0, 5, "author-1");
+        HttpGraphQlTester admin = testerFor("admin", "admin");
+        BookView created = addBook(admin, "Integration Update", 100, 10.0, 5, "author-1");
 
-        BookSummary updated = graphQlTester.document("""
+        BookSummary updated = admin.document("""
                         mutation ($id: ID!, $input: BookUpdateInput!) {
                           updateBook(id: $id, input: $input) { id title stock }
                         }
@@ -316,14 +320,15 @@ class BookGraphQLIntegrationTest {
         assertThat(updated.stock()).isZero();
         assertThat(updated.title()).isEqualTo("Integration Update");
 
-        deleteBook(created.id());
+        deleteBook(admin, created.id());
     }
 
     @Test
     void deleteBookMutationRemovesBookThenReportsNotFound() {
-        BookView created = addBook("Doomed", 100, 10.0, 1, "author-1");
+        HttpGraphQlTester admin = testerFor("admin", "admin");
+        BookView created = addBook(admin, "Doomed", 100, 10.0, 1, "author-1");
 
-        assertThat(deleteBook(created.id())).isTrue();
+        assertThat(deleteBook(admin, created.id())).isTrue();
 
         graphQlTester.document("""
                         query ($id: ID!) {
@@ -335,7 +340,7 @@ class BookGraphQLIntegrationTest {
                 .path("bookById")
                 .valueIsNull();
 
-        graphQlTester.document("mutation ($id: ID!) { deleteBook(id: $id) }")
+        admin.document("mutation ($id: ID!) { deleteBook(id: $id) }")
                 .variable("id", created.id())
                 .execute()
                 .errors()
@@ -347,7 +352,7 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void updateStockMutationChangesAndPersistsStock() {
-        Integer updatedStock = graphQlTester.document("""
+        Integer updatedStock = testerFor("user", "password").document("""
                         mutation ($id: ID!, $stock: Int!) {
                           updateStock(id: $id, stock: $stock) { id title stock }
                         }
@@ -377,7 +382,7 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void updateStockMutationOnUnknownBookIsClassifiedNotFound() {
-        graphQlTester.document("""
+        testerFor("user", "password").document("""
                         mutation ($id: ID!, $stock: Int!) {
                           updateStock(id: $id, stock: $stock) { id }
                         }
@@ -394,7 +399,7 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void invalidBookInputIsClassifiedBadRequest() {
-        graphQlTester.document("""
+        testerFor("user", "password").document("""
                         mutation {
                           addBook(input: {title: "Bad Book", pages: 0, price: 1.0, stock: 1, authorId: "author-1"}) { id }
                         }
@@ -421,7 +426,7 @@ class BookGraphQLIntegrationTest {
 
         try {
             Thread.sleep(1000);
-            addBook("Reactive Integration", 120, 20.0, 3, "author-1");
+            addBook(testerFor("user", "password"), "Reactive Integration", 120, 20.0, 3, "author-1");
 
             SubscribedBook emitted = received.poll(15, TimeUnit.SECONDS);
             assertThat(emitted).isNotNull();
@@ -610,6 +615,115 @@ class BookGraphQLIntegrationTest {
         assertThat(meterRegistry.find("graphql.request.duration").timers()).isNotEmpty();
     }
 
+    @Test
+    void loginIssuesABearerToken() {
+        AuthPayloadView payload = graphQlTester.document("""
+                        mutation {
+                          login(username: "user", password: "password") {
+                            accessToken
+                            tokenType
+                            expiresIn
+                          }
+                        }
+                        """)
+                .execute()
+                .path("login")
+                .entity(AuthPayloadView.class)
+                .get();
+
+        assertThat(payload.accessToken()).isNotBlank();
+        assertThat(payload.tokenType()).isEqualTo("Bearer");
+        assertThat(payload.expiresIn()).isPositive();
+    }
+
+    @Test
+    void loginWithInvalidCredentialsIsUnauthorized() {
+        graphQlTester.document("""
+                        mutation {
+                          login(username: "user", password: "wrong") { accessToken }
+                        }
+                        """)
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getErrorType().toString()).isEqualTo("UNAUTHORIZED");
+                });
+    }
+
+    @Test
+    void anonymousWritesAreUnauthorized() {
+        graphQlTester.document("""
+                        mutation {
+                          addBook(input: {title: "Nope", pages: 10, price: 1.0, stock: 1, authorId: "author-1"}) { id }
+                        }
+                        """)
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getErrorType().toString()).isEqualTo("UNAUTHORIZED");
+                });
+    }
+
+    @Test
+    void nonAdminCannotDeleteABook() {
+        HttpGraphQlTester user = testerFor("user", "password");
+        BookView created = addBook(user, "Protected", 10, 1.0, 1, "author-1");
+
+        try {
+            user.document("mutation ($id: ID!) { deleteBook(id: $id) }")
+                    .variable("id", created.id())
+                    .execute()
+                    .errors()
+                    .satisfy(errors -> {
+                        assertThat(errors).isNotEmpty();
+                        assertThat(errors.get(0).getErrorType().toString()).isEqualTo("FORBIDDEN");
+                    });
+        } finally {
+            deleteBook(testerFor("admin", "admin"), created.id());
+        }
+    }
+
+    @Test
+    void costPriceRequiresAdminAndBubblesThroughNonNull() {
+        Double costPrice = testerFor("admin", "admin").document("""
+                        query { bookById(id: "book-1") { title costPrice } }
+                        """)
+                .execute()
+                .path("bookById.costPrice")
+                .entity(Double.class)
+                .get();
+        assertThat(costPrice).isGreaterThan(0.0);
+
+        // The non-null costPrice error propagates up to the nullable bookById field
+        graphQlTester.document("query { bookById(id: \"book-1\") { costPrice } }")
+                .execute()
+                .errors()
+                .filter(error -> error.getMessage().contains("Authentication required"))
+                .verify()
+                .path("bookById")
+                .valueIsNull();
+    }
+
+    @Test
+    void emailRequiresAuthentication() {
+        graphQlTester.document("query { authors { email } }")
+                .execute()
+                .errors()
+                .satisfy(errors -> assertThat(errors).isNotEmpty());
+
+        String email = testerFor("user", "password").document("""
+                        query { authors { name email } }
+                        """)
+                .execute()
+                .path("authors[0].email")
+                .entity(String.class)
+                .get();
+
+        assertThat(email).contains("@example.com");
+    }
+
     private List<String> titles(String document) {
         return graphQlTester.document(document)
                 .execute()
@@ -621,8 +735,28 @@ class BookGraphQLIntegrationTest {
                 .toList();
     }
 
-    private BookView addBook(String title, int pages, double price, int stock, String authorId) {
-        return graphQlTester.document("""
+    private HttpGraphQlTester testerFor(String username, String password) {
+        String token = graphQlTester.document("""
+                        mutation ($username: String!, $password: String!) {
+                          login(username: $username, password: $password) {
+                            accessToken
+                          }
+                        }
+                        """)
+                .variable("username", username)
+                .variable("password", password)
+                .execute()
+                .path("login.accessToken")
+                .entity(String.class)
+                .get();
+
+        return graphQlTester.mutate()
+                .headers(headers -> headers.setBearerAuth(token))
+                .build();
+    }
+
+    private BookView addBook(HttpGraphQlTester tester, String title, int pages, double price, int stock, String authorId) {
+        return tester.document("""
                         mutation ($input: BookInput!) {
                           addBook(input: $input) {
                             id
@@ -646,8 +780,8 @@ class BookGraphQLIntegrationTest {
                 .get();
     }
 
-    private boolean deleteBook(String id) {
-        return graphQlTester.document("mutation ($id: ID!) { deleteBook(id: $id) }")
+    private boolean deleteBook(HttpGraphQlTester tester, String id) {
+        return tester.document("mutation ($id: ID!) { deleteBook(id: $id) }")
                 .variable("id", id)
                 .execute()
                 .path("deleteBook")

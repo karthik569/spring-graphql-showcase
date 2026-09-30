@@ -17,11 +17,14 @@ import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.MutationMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
+import org.springframework.graphql.data.method.annotation.SchemaMapping;
 import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -190,6 +193,7 @@ public class BookGraphQLController {
      * @param input the input record containing title, pages, price, stock, and author ID
      * @return the created {@link Book} entity
      */
+    @PreAuthorize("isAuthenticated()")
     @MutationMapping
     public Book addBook(@Argument BookInput input) {
         Book book = catalogService.saveBook(
@@ -212,6 +216,7 @@ public class BookGraphQLController {
      * @param input the partial update containing any of title, pages, price, stock, and author ID
      * @return the updated {@link Book} entity
      */
+    @PreAuthorize("isAuthenticated()")
     @MutationMapping
     public Book updateBook(@Argument String id, @Argument BookUpdateInput input) {
         Book book = catalogService.updateBook(id, input);
@@ -225,6 +230,7 @@ public class BookGraphQLController {
      * @param id the book ID to delete
      * @return {@code true} when the book was removed
      */
+    @PreAuthorize("hasRole('ADMIN')")
     @MutationMapping
     public boolean deleteBook(@Argument String id) {
         boolean deleted = catalogService.deleteBook(id);
@@ -240,12 +246,38 @@ public class BookGraphQLController {
      * @return the updated {@link Book} entity
      * @deprecated use {@code updateBook(id: ID!, input: BookUpdateInput!)} instead
      */
+    @PreAuthorize("isAuthenticated()")
     @Deprecated
     @MutationMapping
     public Book updateStock(@Argument String id, @Argument int stock) {
         Book book = catalogService.updateStock(id, stock);
         log.info("Mutation 'updateStock' id='{}' stock={} -> updated", id, stock);
         return book;
+    }
+
+    /**
+     * Field-level authorization: the internal cost price is visible only to administrators. Because
+     * the field is non-null, a denied read also demonstrates non-null error propagation.
+     *
+     * @param book the parent book
+     * @return the derived internal cost price
+     */
+    @SchemaMapping(typeName = "Book", field = "costPrice")
+    @PreAuthorize("hasRole('ADMIN')")
+    public double costPrice(Book book) {
+        return Math.round(book.price() * 0.6 * 100.0) / 100.0;
+    }
+
+    /**
+     * Field-level authorization: contact details require an authenticated caller.
+     *
+     * @param author the parent author
+     * @return the derived contact email
+     */
+    @SchemaMapping(typeName = "Author", field = "email")
+    @PreAuthorize("isAuthenticated()")
+    public String email(Author author) {
+        return author.name().toLowerCase(Locale.ROOT).replace(' ', '.') + "@example.com";
     }
 
     /**

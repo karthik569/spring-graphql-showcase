@@ -10,11 +10,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.graphql.execution.DataFetcherExceptionResolverAdapter;
 import org.springframework.graphql.execution.ErrorType;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 /**
- * Maps domain exceptions onto typed GraphQL errors so clients receive a meaningful
- * {@code classification} (NOT_FOUND / BAD_REQUEST) instead of an opaque INTERNAL_ERROR.
+ * Maps domain and security exceptions onto typed GraphQL errors so clients receive a meaningful
+ * {@code classification} (NOT_FOUND / BAD_REQUEST / UNAUTHORIZED / FORBIDDEN) instead of an opaque
+ * INTERNAL_ERROR.
  */
 @Component
 public class GraphQlExceptionResolver extends DataFetcherExceptionResolverAdapter {
@@ -24,18 +30,33 @@ public class GraphQlExceptionResolver extends DataFetcherExceptionResolverAdapte
     @Override
     protected GraphQLError resolveToSingleError(Throwable ex, DataFetchingEnvironment env) {
         if (ex instanceof BookNotFoundException || ex instanceof AuthorNotFoundException) {
-            return toError(ex, ErrorType.NOT_FOUND, env);
+            return toError(ex.getMessage(), ErrorType.NOT_FOUND, env);
         }
         if (ex instanceof InvalidBookInputException) {
-            return toError(ex, ErrorType.BAD_REQUEST, env);
+            return toError(ex.getMessage(), ErrorType.BAD_REQUEST, env);
+        }
+        if (ex instanceof AuthenticationException) {
+            return toError("Invalid credentials", ErrorType.UNAUTHORIZED, env);
+        }
+        if (ex instanceof AccessDeniedException) {
+            boolean anonymous = isAnonymous();
+            return toError(anonymous ? "Authentication required" : "Access denied",
+                    anonymous ? ErrorType.UNAUTHORIZED : ErrorType.FORBIDDEN, env);
         }
         return null;
     }
 
-    private GraphQLError toError(Throwable ex, ErrorType type, DataFetchingEnvironment env) {
-        log.warn("GraphQL request failed [{}]: {}", type, ex.getMessage());
+    private static boolean isAnonymous() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication == null
+                || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken;
+    }
+
+    private GraphQLError toError(String message, ErrorType type, DataFetchingEnvironment env) {
+        log.warn("GraphQL request failed [{}]: {}", type, message);
         return GraphqlErrorBuilder.newError(env)
-                .message(ex.getMessage())
+                .message(message)
                 .errorType(type)
                 .build();
     }
