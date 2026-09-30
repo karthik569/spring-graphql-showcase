@@ -1,6 +1,8 @@
 package com.example.graphql.controller;
 
 import com.example.graphql.events.BookEventPublisher;
+import com.example.graphql.exception.AuthorNotFoundException;
+import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.AuthorConnection;
 import com.example.graphql.model.Book;
@@ -12,6 +14,7 @@ import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.model.Magazine;
 import com.example.graphql.model.Publication;
 import com.example.graphql.model.PublicationConnection;
+import com.example.graphql.model.ValidationFailed;
 import com.example.graphql.repository.CatalogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -253,6 +256,31 @@ public class BookGraphQLController {
         log.info("Mutation 'addBook' title='{}' authorId='{}' -> created id='{}'",
                 book.title(), book.authorId(), book.id());
         return book;
+    }
+
+    /**
+     * Resolves {@code addBookResult(input: BookInput!)}: the error-as-data counterpart of
+     * {@link #addBook(BookInput)}. Validation problems come back as {@link ValidationFailed} data
+     * instead of a GraphQL {@code errors} entry, so clients must handle both union members.
+     *
+     * @param input the input record containing title, pages, price, stock, and author ID
+     * @return either the created {@link Book} or a {@link ValidationFailed}
+     */
+    @PreAuthorize("isAuthenticated()")
+    @MutationMapping
+    public Object addBookResult(@Argument BookInput input) {
+        try {
+            Book book = catalogService.saveBook(
+                    input.title(), input.pages(), input.price(), input.stock(), input.authorId());
+            log.info("Mutation 'addBookResult' -> created id='{}'", book.id());
+            return book;
+        } catch (InvalidBookInputException ex) {
+            log.info("Mutation 'addBookResult' -> ValidationFailed field='{}'", ex.getField());
+            return new ValidationFailed(ex.getMessage(), ex.getField());
+        } catch (AuthorNotFoundException ex) {
+            log.info("Mutation 'addBookResult' -> ValidationFailed field='authorId'");
+            return new ValidationFailed(ex.getMessage(), "authorId");
+        }
     }
 
     /**

@@ -347,7 +347,7 @@ public class CatalogDataService {
             throw new BookNotFoundException(bookId);
         }
         if (newStock < 0) {
-            throw new InvalidBookInputException("stock must not be negative");
+            throw new InvalidBookInputException("stock", "stock must not be negative");
         }
         Book updated = new Book(existing.id(), existing.title(), existing.pages(), existing.price(), newStock, existing.authorId());
         books.put(bookId, updated);
@@ -363,16 +363,16 @@ public class CatalogDataService {
 
     private void validateBook(String title, int pages, double price, int stock, String authorId) {
         if (title == null || title.isBlank()) {
-            throw new InvalidBookInputException("title must not be blank");
+            throw new InvalidBookInputException("title", "title must not be blank");
         }
         if (pages <= 0) {
-            throw new InvalidBookInputException("pages must be positive");
+            throw new InvalidBookInputException("pages", "pages must be positive");
         }
         if (price < 0) {
-            throw new InvalidBookInputException("price must not be negative");
+            throw new InvalidBookInputException("price", "price must not be negative");
         }
         if (stock < 0) {
-            throw new InvalidBookInputException("stock must not be negative");
+            throw new InvalidBookInputException("stock", "stock must not be negative");
         }
         if (authorId == null || !authors.containsKey(authorId)) {
             throw new AuthorNotFoundException(authorId);

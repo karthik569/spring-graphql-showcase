@@ -16,6 +16,7 @@ type Query {
 type Mutation {
     login(username: String!, password: String!): AuthPayload!
     addBook(input: BookInput!): Book!
+    addBookResult(input: BookInput!): AddBookResult!
     updateBook(id: ID!, input: BookUpdateInput!): Book!
     deleteBook(id: ID!): Boolean!
     updateStock(id: ID!, stock: Int!): Book! @deprecated(reason: "Use updateBook instead")
@@ -59,6 +60,13 @@ type Magazine implements Publication {
 }
 
 union SearchResult = Book | Magazine | Author
+
+type ValidationFailed {
+    message: String!
+    field: String!
+}
+
+union AddBookResult = Book | ValidationFailed
 
 type BookConnection {
     edges: [BookEdge!]!

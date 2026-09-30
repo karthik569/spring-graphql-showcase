@@ -844,6 +844,62 @@ class BookGraphQLIntegrationTest {
         assertThat(magazine.publishedOn()).isEqualTo("2024-07-01T00:00:00Z");
     }
 
+    @Test
+    void addBookResultReturnsTheCreatedBookAsData() {
+        String id = testerFor("user", "password").document("""
+                        mutation {
+                          addBookResult(input: {title: "Union Book", pages: 10, price: 5.0, stock: 2, authorId: "author-1"}) {
+                            __typename
+                            ... on Book { id title }
+                            ... on ValidationFailed { field message }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("addBookResult.id")
+                .entity(String.class)
+                .get();
+
+        assertThat(id).startsWith("book-");
+    }
+
+    @Test
+    void addBookResultReturnsValidationFailureAsData() {
+        String field = testerFor("user", "password").document("""
+                        mutation {
+                          addBookResult(input: {title: "Bad Book", pages: 0, price: 5.0, stock: 2, authorId: "author-1"}) {
+                            __typename
+                            ... on Book { id }
+                            ... on ValidationFailed { field message }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("addBookResult.field")
+                .entity(String.class)
+                .get();
+
+        assertThat(field).isEqualTo("pages");
+    }
+
+    @Test
+    void addBookResultReportsAnUnknownAuthorAsData() {
+        String field = testerFor("user", "password").document("""
+                        mutation {
+                          addBookResult(input: {title: "Orphan", pages: 10, price: 5.0, stock: 2, authorId: "author-999"}) {
+                            __typename
+                            ... on ValidationFailed { field message }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("addBookResult.field")
+                .entity(String.class)
+                .get();
+
+        assertThat(field).isEqualTo("authorId");
+    }
+
     private List<String> titles(String document) {
         return graphQlTester.document(document)
                 .execute()

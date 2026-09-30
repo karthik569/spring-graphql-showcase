@@ -258,4 +258,13 @@ class CatalogDataServiceTest {
     void testMagazineWithoutAWebsiteIsAllowed() {
         assertNull(service.getMagazineById("magazine-3").orElseThrow().website());
     }
+
+    @Test
+    void testValidationExceptionCarriesTheField() {
+        InvalidBookInputException ex = assertThrows(InvalidBookInputException.class,
+                () -> service.saveBook("Fine", 0, 10.0, 1, "author-1"));
+
+        assertEquals("pages", ex.getField());
+        assertEquals("pages must be positive", ex.getMessage());
+    }
 }
