@@ -1,5 +1,6 @@
 package com.example.graphql.controller;
 
+import com.example.graphql.config.WebSocketAuthInterceptor;
 import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.exception.AuthorNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
@@ -16,6 +17,7 @@ import com.example.graphql.model.Publication;
 import com.example.graphql.model.PublicationConnection;
 import com.example.graphql.model.ValidationFailed;
 import com.example.graphql.repository.CatalogDataService;
+import graphql.GraphQLContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -24,7 +26,9 @@ import org.springframework.graphql.data.method.annotation.MutationMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
 import org.springframework.graphql.data.method.annotation.SchemaMapping;
 import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import reactor.core.publisher.Flux;
 
@@ -385,11 +389,21 @@ public class BookGraphQLController {
 
     /**
      * Subscription stream of newly created books, pushed to subscribed clients over WebSocket.
+     * <p>
+     * Requires an authenticated connection: the WebSocket interceptor places the authentication in
+     * the GraphQL context, and it is checked here because the servlet thread's security context does
+     * not apply to WebSocket messages.
      *
+     * @param context the GraphQL context populated by {@link WebSocketAuthInterceptor}
      * @return a hot {@link Flux} emitting every book added after the client subscribes
      */
     @SubscriptionMapping
-    public Flux<Book> bookAdded() {
+    public Flux<Book> bookAdded(GraphQLContext context) {
+        Authentication authentication = context.get(WebSocketAuthInterceptor.AUTHENTICATION_KEY);
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        log.info("Subscription 'bookAdded' started for '{}'", authentication.getName());
         return publisher.stream();
     }
 }

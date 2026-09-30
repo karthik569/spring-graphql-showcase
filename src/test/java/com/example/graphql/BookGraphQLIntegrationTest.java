@@ -13,6 +13,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import reactor.core.Disposable;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -20,6 +21,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureHttpGraphQlTester
@@ -425,6 +427,7 @@ class BookGraphQLIntegrationTest {
     void bookAddedSubscriptionEmitsNewBooks() throws InterruptedException {
         WebSocketGraphQlTester wsTester = WebSocketGraphQlTester
                 .builder("http://localhost:" + port + "/graphql", new ReactorNettyWebSocketClient())
+                .headers(headers -> headers.setBearerAuth(loginToken("user", "password")))
                 .build();
 
         BlockingQueue<SubscribedBook> received = new LinkedBlockingQueue<>();
@@ -911,8 +914,27 @@ class BookGraphQLIntegrationTest {
                 .toList();
     }
 
-    private HttpGraphQlTester testerFor(String username, String password) {
-        String token = graphQlTester.document("""
+    @Test
+    void subscriptionRequiresAuthentication() {
+        WebSocketGraphQlTester anonymous = WebSocketGraphQlTester
+                .builder("http://localhost:" + port + "/graphql", new ReactorNettyWebSocketClient())
+                .build();
+
+        try {
+            Throwable thrown = catchThrowable(() -> anonymous.document("subscription { bookAdded { id } }")
+                    .executeSubscription()
+                    .toFlux()
+                    .blockFirst(Duration.ofSeconds(10)));
+
+            assertThat(thrown).isNotNull();
+            assertThat(thrown.getMessage()).contains("UNAUTHORIZED");
+        } finally {
+            anonymous.stop().block();
+        }
+    }
+
+    private String loginToken(String username, String password) {
+        return graphQlTester.document("""
                         mutation ($username: String!, $password: String!) {
                           login(username: $username, password: $password) {
                             accessToken
@@ -925,9 +947,11 @@ class BookGraphQLIntegrationTest {
                 .path("login.accessToken")
                 .entity(String.class)
                 .get();
+    }
 
+    private HttpGraphQlTester testerFor(String username, String password) {
         return graphQlTester.mutate()
-                .headers(headers -> headers.setBearerAuth(token))
+                .headers(headers -> headers.setBearerAuth(loginToken(username, password)))
                 .build();
     }
 

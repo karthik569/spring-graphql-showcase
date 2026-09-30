@@ -1,9 +1,13 @@
 package com.example.graphql.config;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import graphql.GraphqlErrorBuilder;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.graphql.execution.ErrorType;
+import org.springframework.graphql.execution.SubscriptionExceptionResolver;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -108,5 +112,19 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         return http.build();
+    }
+
+    /**
+     * Subscription failures are resolved separately from data fetcher exceptions, so the same
+     * access-denied mapping has to be registered here as well.
+     */
+    @Bean
+    public SubscriptionExceptionResolver subscriptionExceptionResolver() {
+        return SubscriptionExceptionResolver.forSingleError(exception -> exception instanceof AccessDeniedException
+                ? GraphqlErrorBuilder.newError()
+                        .message("Authentication required")
+                        .errorType(ErrorType.UNAUTHORIZED)
+                        .build()
+                : null);
     }
 }
