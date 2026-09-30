@@ -6,9 +6,12 @@ import com.example.graphql.exception.BookNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
+import com.example.graphql.model.BookConnection;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
+import com.example.graphql.model.Magazine;
+import com.example.graphql.model.Publication;
 import com.example.graphql.repository.CatalogDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -166,5 +169,55 @@ class CatalogDataServiceTest {
     @Test
     void testUpdateStockThrowsForUnknownBook() {
         assertThrows(BookNotFoundException.class, () -> service.updateStock("does-not-exist", 5));
+    }
+
+    @Test
+    void testGetPublicationsIncludesBooksAndMagazines() {
+        List<Publication> publications = service.getPublications();
+
+        assertEquals(6, publications.size());
+        assertTrue(publications.stream().anyMatch(publication -> publication.id().equals("book-1")));
+        assertTrue(publications.stream().anyMatch(publication -> publication.id().equals("magazine-1")));
+    }
+
+    @Test
+    void testGetMagazineById() {
+        assertEquals("GraphQL Weekly", service.getMagazineById("magazine-2").orElseThrow().title());
+        assertTrue(service.getMagazineById("does-not-exist").isEmpty());
+    }
+
+    @Test
+    void testSearchMatchesAcrossTypes() {
+        List<Object> javaResults = service.search("java");
+        assertTrue(javaResults.stream().anyMatch(result -> result instanceof Book));
+        assertTrue(javaResults.stream().anyMatch(result -> result instanceof Magazine));
+        assertFalse(javaResults.stream().anyMatch(result -> result instanceof Author));
+
+        assertTrue(service.search("a").stream().anyMatch(result -> result instanceof Author));
+    }
+
+    @Test
+    void testBookConnectionPagesWithCursors() {
+        BookConnection firstPage = service.bookConnection(2, null, null, BookSort.TITLE_ASC);
+
+        assertEquals(2, firstPage.edges().size());
+        assertEquals(4, firstPage.totalCount());
+        assertTrue(firstPage.pageInfo().hasNextPage());
+        assertFalse(firstPage.pageInfo().hasPreviousPage());
+        assertNotNull(firstPage.pageInfo().endCursor());
+
+        BookConnection secondPage = service.bookConnection(2, firstPage.pageInfo().endCursor(), null, BookSort.TITLE_ASC);
+
+        assertEquals(2, secondPage.edges().size());
+        assertTrue(secondPage.pageInfo().hasPreviousPage());
+        assertNotEquals(firstPage.edges().get(0).node().id(), secondPage.edges().get(0).node().id());
+    }
+
+    @Test
+    void testBookConnectionWithUnparseableCursorStartsFromTheBeginning() {
+        BookConnection connection = service.bookConnection(1, "not-a-cursor", null, BookSort.TITLE_ASC);
+
+        assertEquals(1, connection.edges().size());
+        assertFalse(connection.pageInfo().hasPreviousPage());
     }
 }
