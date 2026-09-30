@@ -13,6 +13,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import reactor.core.Disposable;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -930,6 +933,62 @@ class BookGraphQLIntegrationTest {
             assertThat(thrown.getMessage()).contains("UNAUTHORIZED");
         } finally {
             anonymous.stop().block();
+        }
+    }
+
+    @Test
+    void persistedQueriesCanBeRegisteredThenFetchedByHash() {
+        String document = "query { bookCount }";
+        String hash = sha256Hex(document);
+
+        Integer registered = graphQlTester.document(document)
+                .extension("persistedQuery", Map.of("sha256Hash", hash))
+                .execute()
+                .path("bookCount")
+                .entity(Integer.class)
+                .get();
+
+        Integer fromHash = graphQlTester.document("")
+                .extension("persistedQuery", Map.of("sha256Hash", hash))
+                .execute()
+                .path("bookCount")
+                .entity(Integer.class)
+                .get();
+
+        assertThat(fromHash).isEqualTo(registered);
+    }
+
+    @Test
+    void unknownPersistedQueryHashIsRejected() {
+        graphQlTester.document("")
+                .extension("persistedQuery", Map.of("sha256Hash", "0".repeat(64)))
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getMessage()).contains("PersistedQueryNotFound");
+                });
+    }
+
+    @Test
+    void mismatchedPersistedQueryHashIsRejected() {
+        graphQlTester.document("query { bookCount }")
+                .extension("persistedQuery", Map.of("sha256Hash", "1".repeat(64)))
+                .execute()
+                .errors()
+                .satisfy(errors -> assertThat(errors).isNotEmpty());
+    }
+
+    private static String sha256Hex(String document) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(document.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                hex.append(Character.forDigit((value >> 4) & 0xF, 16)).append(Character.forDigit(value & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
         }
     }
 
