@@ -16,6 +16,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 7. **Interfaces, unions & custom scalars**: A `Publication` interface implemented by `Book` and `Magazine`, a `SearchResult` union, and hand-written `DateTime` and `URL` scalars.
 8. **Cursor connections**: Relay-style pagination with `edges`, opaque cursors, and `pageInfo`.
 9. **Hardening & observability**: Query depth, complexity, and length limits plus request logging and Micrometer metrics.
+10. **Authorization**: JWT bearer tokens issued by a public `login` mutation, with `@PreAuthorize` rules on writes and on sensitive fields.
+11. **More connections & scalar input**: Cursor connections for authors and publications, and `DateTime` used as a query argument.
 
 ```
  [GraphQL Client / GraphiQL IDE]
@@ -46,6 +48,15 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`BookConnection bookConnection(Integer first, String after, BookFilter filter, BookSort sort)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `bookConnection(first: Int, after: String, ...): BookConnection!`, delegating to `catalogService.bookConnection(...)` for Relay-style cursor paging.
+- **`AuthorConnection authorConnection(Integer first, String after)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Cursor pagination over authors, ordered by name.
+- **`PublicationConnection publicationConnection(Integer first, String after)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Cursor pagination over every publication; edges carry the `Publication` interface, so clients page books and magazines together with inline fragments.
+- **`List<Magazine> magazinesPublishedAfter(Instant since)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Resolves `magazinesPublishedAfter(since: DateTime!)`, the one place a custom scalar is used as an argument (exercising `parseValue`/`parseLiteral`).
 - **`Optional<Book> bookById(@Argument String id)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `bookById(id: ID!): Book` by querying the catalog for the specified ID.
@@ -61,6 +72,12 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`List<Object> search(@Argument String text)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `search(text: String!): [SearchResult!]!`, returning books, magazines, and authors whose title or name contains the text.
+- **`double costPrice(Book book)`**:
+  - *Annotation*: `@SchemaMapping(typeName = "Book", field = "costPrice")` + `@PreAuthorize("hasRole('ADMIN')")`.
+  - *Operation*: Field-level authorization. The derived internal price is only visible to administrators; because the field is non-null, a denied read also demonstrates non-null error propagation.
+- **`String email(Author author)`**:
+  - *Annotation*: `@SchemaMapping(typeName = "Author", field = "email")` + `@PreAuthorize("isAuthenticated()")`.
+  - *Operation*: Field-level authorization requiring any authenticated caller.
 - **`Book addBook(@Argument BookInput input)`**:
   - *Annotation*: `@MutationMapping`.
   - *Operation*: Validates and saves a new book, then publishes a `bookAdded` event.
@@ -94,6 +111,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Operation*: Counts the books matching a filter, sharing the same filter predicate as `findBooks`.
 - **`BookConnection bookConnection(Integer first, String after, BookFilter filter, BookSort sort)`**:
   - *Operation*: Reuses the same filter/sort pipeline, then slices a page. Cursors are Base64 of `offset:<n>` where `n` is the 1-based edge position, so `after` resumes at the following offset; an unparseable cursor falls back to the start. `pageInfo` reports `hasNextPage`/`hasPreviousPage` plus the start and end cursors.
+- **`AuthorConnection authorConnection(Integer first, String after)`** / **`PublicationConnection publicationConnection(Integer first, String after)`**:
+  - *Operation*: The same cursor maths over authors (ordered by name) and over all publications (ordered by title), sharing the private `page(...)` helper and cursor codec.
 - **`Map<Book, Author> getAuthorsForBooks(List<Book> books)`**:
   - *Inputs*: `List<Book>` requested in the current query.
   - *Operation*: Collects unique author IDs from the books, executes a single bulk author lookup, and maps each `Book` key to its corresponding `Author` value.
@@ -111,6 +130,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Operation*: Magazines live in their own map; `getPublications()` returns books and magazines together as `Publication` values, which backs the GraphQL interface.
 - **`List<Object> search(String text)`**:
   - *Operation*: Case-insensitive match across book titles, magazine titles, and author names; the heterogeneous result list backs the `SearchResult` union.
+- **`List<Magazine> magazinesPublishedAfter(Instant since)`**:
+  - *Operation*: Filters magazines at or after `since`, ordered by publication date.
 - **`validateBook(...)`**:
   - *Operation*: Shared guard raising `InvalidBookInputException` (blank title, non-positive pages, negative price/stock) or `AuthorNotFoundException` (unknown author ID).
 
@@ -137,3 +158,11 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 #### `GraphQlRequestInterceptor`
 - *Annotation*: `@Component` implementing `WebGraphQlInterceptor`.
 - *Operation*: Times every GraphQL request, logs the operation with its duration and outcome, and records a Micrometer timer named `graphql.request.duration` tagged by `operation` and `outcome`. Spring Boot separately auto-instruments GraphQL requests as `graphql.request`.
+
+#### `SecurityConfig` / `JwtProperties`
+- *Annotation*: `@Configuration @EnableMethodSecurity`; settings under `security.jwt`.
+- *Operation*: Builds the HMAC-SHA256 `SecretKey`, a `NimbusJwtDecoder` (resource server validation) and a `NimbusJwtEncoder` (token minting), an in-memory `UserDetailsService`, and a `JwtAuthenticationConverter` that maps the `roles` claim to `ROLE_*` authorities. The filter chain disables CSRF and permits `/graphql`, `/graphiql`, and `/actuator/**`; authorization is then enforced per resolver by `@PreAuthorize`.
+
+#### `AuthController`
+- *Annotation*: `@Controller` with a `@MutationMapping`.
+- *Operation*: Resolves the public `login(username, password)` mutation: authenticates through the `AuthenticationManager`, then mints a JWT carrying `sub`, `roles`, and an expiry, returning an `AuthPayload`.

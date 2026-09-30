@@ -166,6 +166,7 @@
       <li><a href="#modeling">Interfaces, unions, and custom scalars</a></li>
       <li><a href="#connections">Cursor connections</a></li>
       <li><a href="#hardening">Hardening and observability</a></li>
+      <li><a href="#auth">Authorization with JWT bearer tokens</a></li>
       <li><a href="#exercises">Hands-on exercises</a></li>
       <li><a href="#verify">Verifying it works</a></li>
       <li><a href="#logging">Logging and observability</a></li>
@@ -189,6 +190,7 @@
       <li><strong>Interfaces, unions, and custom scalars</strong> — a <code>Publication</code> interface, a <code>SearchResult</code> union, and hand-written <code>DateTime</code>/<code>URL</code> scalars.</li>
       <li><strong>Cursor connections</strong> — Relay-style pagination with edges, opaque cursors, and <code>pageInfo</code>.</li>
       <li><strong>Hardening and observability</strong> — query depth, complexity, and length limits plus request metrics.</li>
+      <li><strong>Authorization</strong> — JWT bearer tokens with operation- and field-level rules.</li>
     </ul>
     <div class="callout">
       <p class="label">Mental model</p>
@@ -476,8 +478,15 @@ public Map&lt;Book, Author&gt; author(List&lt;Book&gt; books) {
       <tbody>
         <tr><td><code>books</code></td><td><code>books(filter: BookFilter, sort: BookSort, limit: Int, offset: Int): [Book!]!</code></td><td><code>books(BookFilter, BookSort, Integer, Integer)</code></td></tr>
         <tr><td><code>bookCount</code></td><td><code>bookCount(filter: BookFilter): Int!</code></td><td><code>bookCount(BookFilter)</code></td></tr>
+        <tr><td><code>bookConnection</code></td><td><code>bookConnection(first: Int, after: String, filter: BookFilter, sort: BookSort): BookConnection!</code></td><td><code>bookConnection(...)</code></td></tr>
         <tr><td><code>bookById</code></td><td><code>bookById(id: ID!): Book</code></td><td><code>bookById(String id)</code></td></tr>
+        <tr><td><code>publications</code></td><td><code>publications: [Publication!]!</code></td><td><code>publications()</code></td></tr>
+        <tr><td><code>publicationConnection</code></td><td><code>publicationConnection(first: Int, after: String): PublicationConnection!</code></td><td><code>publicationConnection(...)</code></td></tr>
+        <tr><td><code>magazineById</code></td><td><code>magazineById(id: ID!): Magazine</code></td><td><code>magazineById(String id)</code></td></tr>
+        <tr><td><code>magazinesPublishedAfter</code></td><td><code>magazinesPublishedAfter(since: DateTime!): [Magazine!]!</code></td><td><code>magazinesPublishedAfter(Instant since)</code></td></tr>
+        <tr><td><code>search</code></td><td><code>search(text: String!): [SearchResult!]!</code></td><td><code>search(String text)</code></td></tr>
         <tr><td><code>authors</code></td><td><code>authors: [Author!]!</code></td><td><code>authors()</code></td></tr>
+        <tr><td><code>authorConnection</code></td><td><code>authorConnection(first: Int, after: String): AuthorConnection!</code></td><td><code>authorConnection(...)</code></td></tr>
         <tr><td><code>authorById</code></td><td><code>authorById(id: ID!): Author</code></td><td><code>authorById(String id)</code></td></tr>
       </tbody>
     </table>
@@ -496,12 +505,13 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
 
     <h3>Mutations</h3>
     <table>
-      <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
+      <thead><tr><th>Operation</th><th>Signature</th><th>Requires</th><th>Resolved by</th></tr></thead>
       <tbody>
-        <tr><td><code>addBook</code></td><td><code>addBook(input: BookInput!): Book!</code></td><td><code>addBook(BookInput input)</code></td></tr>
-        <tr><td><code>updateBook</code></td><td><code>updateBook(id: ID!, input: BookUpdateInput!): Book!</code></td><td><code>updateBook(String id, BookUpdateInput input)</code></td></tr>
-        <tr><td><code>deleteBook</code></td><td><code>deleteBook(id: ID!): Boolean!</code></td><td><code>deleteBook(String id)</code></td></tr>
-        <tr><td><code>updateStock</code> <em>(deprecated)</em></td><td><code>updateStock(id: ID!, stock: Int!): Book! @deprecated</code></td><td><code>updateStock(String id, int stock)</code></td></tr>
+        <tr><td><code>login</code></td><td><code>login(username: String!, password: String!): AuthPayload!</code></td><td>public</td><td><code>AuthController.login(String, String)</code></td></tr>
+        <tr><td><code>addBook</code></td><td><code>addBook(input: BookInput!): Book!</code></td><td>authenticated</td><td><code>addBook(BookInput input)</code></td></tr>
+        <tr><td><code>updateBook</code></td><td><code>updateBook(id: ID!, input: BookUpdateInput!): Book!</code></td><td>authenticated</td><td><code>updateBook(String id, BookUpdateInput input)</code></td></tr>
+        <tr><td><code>deleteBook</code></td><td><code>deleteBook(id: ID!): Boolean!</code></td><td>ADMIN</td><td><code>deleteBook(String id)</code></td></tr>
+        <tr><td><code>updateStock</code> <em>(deprecated)</em></td><td><code>updateStock(id: ID!, stock: Int!): Book! @deprecated</code></td><td>authenticated</td><td><code>updateStock(String id, int stock)</code></td></tr>
       </tbody>
     </table>
 
@@ -877,8 +887,75 @@ public Instrumentation maxQueryDepthInstrumentation(GraphQlLimitsProperties prop
 curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
   </section>
 
+  <section id="auth">
+    <h2>17. Authorization with JWT bearer tokens</h2>
+    <p>Reads stay public, but writes are protected. A client obtains a token from the public <code>login</code> mutation and sends it as <code>Authorization: Bearer &lt;token&gt;</code>; Spring Security validates it as an OAuth2 resource server before the resolver runs.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Token flow</strong> — login mints a signed JWT, the bearer filter validates it, and @PreAuthorize decides.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as GraphQL Client
+  participant A as AuthController.login
+  participant E as JwtEncoder
+  participant F as Bearer token filter
+  participant R as Resolver with PreAuthorize
+
+  C->>A: mutation login(username, password)
+  A->>A: authenticate against the user store
+  A->>E: sign claims sub, roles, exp with the HMAC key
+  E-->>A: JWT
+  A-->>C: AuthPayload with accessToken, tokenType, expiresIn
+  C->>F: query or mutation with Authorization Bearer token
+  F->>F: validate signature and expiry, map roles to authorities
+  F->>R: invoke the resolver
+  R-->>C: data, or UNAUTHORIZED and FORBIDDEN errors
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>Rules are declared per resolver with <code>@PreAuthorize</code>, so one endpoint can mix public and protected fields:</p>
+    <pre><code>@PreAuthorize("isAuthenticated()")   // addBook, updateBook, updateStock
+@PreAuthorize("hasRole('ADMIN')")    // deleteBook, Book.costPrice
+@PreAuthorize("isAuthenticated()")   // Author.email</code></pre>
+
+    <pre><code># 1. Log in (dev users: user/password and admin/admin)
+mutation {
+  login(username: "user", password: "password") {
+    accessToken
+    tokenType
+    expiresIn
+  }
+}</code></pre>
+
+    <p>In GraphiQL, paste the token into the headers panel as <code>{"Authorization": "Bearer &lt;token&gt;"}</code>. Failures arrive as typed GraphQL errors rather than HTTP 401/403:</p>
+    <pre><code># anonymous addBook
+{ "errors": [{ "message": "Authentication required",
+               "extensions": { "classification": "UNAUTHORIZED" } }] }
+
+# a user token calling deleteBook
+{ "errors": [{ "message": "Access denied",
+               "extensions": { "classification": "FORBIDDEN" } }] }</code></pre>
+
+    <h3>Nullability: null versus error propagation</h3>
+    <p>Two outcomes look similar but behave differently:</p>
+    <ul>
+      <li><strong>Nullable fields return null.</strong> <code>Magazine.website</code> is nullable, so a magazine without a website returns <code>null</code> with no error — the rest of the response is unaffected.</li>
+      <li><strong>Non-null fields propagate.</strong> <code>Book.costPrice</code> is <code>Float!</code>. Requesting it without the ADMIN role errors, and because it is non-null the error bubbles to the nearest nullable ancestor: under <code>bookById</code> that yields <code>{"bookById": null}</code>, and under <code>books: [Book!]!</code> it nulls the whole <code>data</code> payload.</li>
+    </ul>
+
+    <div class="callout warn">
+      <p class="label">Dev-only</p>
+      <p><code>security.jwt.secret</code> is a placeholder and the users are in memory. Override the secret and swap in a real user store before deploying.</p>
+    </div>
+  </section>
+
   <section id="exercises">
-    <h2>17. Hands-on exercises</h2>
+    <h2>18. Hands-on exercises</h2>
     <p>Try these in GraphiQL (<a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>) — it gives you autocomplete and error highlighting.</p>
     <ol>
       <li><strong>Field selection.</strong> Query only <code>books { title }</code>, then only <code>books { title price }</code>. Notice the response changes shape with the request. That is GraphQL's core promise over REST.</li>
@@ -895,12 +972,15 @@ curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
       <li><strong>Query a union.</strong> Run <code>search(text: "java") { __typename ... on Book { title } ... on Magazine { title } }</code> and inspect the <code>__typename</code> values.</li>
       <li><strong>Walk a cursor page.</strong> Request <code>bookConnection(first: 2)</code>, copy <code>pageInfo.endCursor</code>, and pass it back as <code>after</code>.</li>
       <li><strong>Hit a limit.</strong> Send an over-deep query and read the error the instrumentation returns.</li>
+      <li><strong>Get a token.</strong> Run the <code>login</code> mutation for <code>user</code> and for <code>admin</code> and compare the returned tokens.</li>
+      <li><strong>Feel the rules.</strong> Call <code>addBook</code> anonymously (UNAUTHORIZED), then with the user token (works), then <code>deleteBook</code> with the user token (FORBIDDEN) and with the admin token (works).</li>
+      <li><strong>Watch a field denial.</strong> Query <code>books { costPrice }</code> anonymously and with the admin token, and compare the shape of <code>data</code>.</li>
       <li><strong>Extend the schema.</strong> Add a new field of your own — edit <code>schema.graphqls</code>, add the resolver, restart, and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
     </ol>
   </section>
 
   <section id="verify">
-    <h2>18. Verifying it works</h2>
+    <h2>19. Verifying it works</h2>
     <p>After starting the app, verify in layers — cheapest first:</p>
     <table>
       <thead><tr><th>Check</th><th>Command / action</th><th>Expected</th></tr></thead>
@@ -920,7 +1000,11 @@ curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
         <tr><td>Cursor paging works</td><td><code>bookConnection(first: 2) { edges { cursor } pageInfo { endCursor } }</code>, then reuse the cursor</td><td>The next page resumes after the previous one</td></tr>
         <tr><td>Limits are enforced</td><td>Send an over-deep or oversized query</td><td>An <code>errors</code> array instead of execution</td></tr>
         <tr><td>Metrics are recorded</td><td><code>curl -s localhost:8086/actuator/metrics/graphql.request</code></td><td>A <code>graphql.request</code> timer is present</td></tr>
-        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 48, Failures: 0, Errors: 0</td></tr>
+        <tr><td>Login issues a token</td><td><code>mutation { login(username: "user", password: "password") { accessToken } }</code></td><td>A signed JWT is returned</td></tr>
+        <tr><td>Writes require a token</td><td>Anonymous <code>addBook</code>, then the same call with <code>Authorization: Bearer &lt;token&gt;</code></td><td>UNAUTHORIZED, then success</td></tr>
+        <tr><td>Roles are enforced</td><td><code>deleteBook</code> with a user token, then an admin token</td><td>FORBIDDEN, then success</td></tr>
+        <tr><td>Field-level rules</td><td><code>books { costPrice }</code> anonymously vs with an admin token</td><td>An error with nulled data, then numbers</td></tr>
+        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 63, Failures: 0, Errors: 0</td></tr>
       </tbody>
     </table>
     <div class="callout">
@@ -930,7 +1014,7 @@ curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
   </section>
 
   <section id="logging">
-    <h2>19. Logging and observability</h2>
+    <h2>20. Logging and observability</h2>
     <p>The app logs through <strong>SLF4J + Logback</strong> (Logback comes in with <code>spring-boot-starter-web</code>). Configuration lives in <code>application.yml</code>:</p>
     <pre><code>logging:
   level:
@@ -951,7 +1035,7 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="troubleshoot">
-    <h2>20. Troubleshooting</h2>
+    <h2>21. Troubleshooting</h2>
     <table>
       <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
       <tbody>
@@ -965,18 +1049,18 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="next">
-    <h2>21. Where to go next</h2>
+    <h2>22. Where to go next</h2>
     <ul>
       <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is the single source of truth for the entire API surface.</li>
       <li><strong>Follow one request end to end.</strong> Start in <code>BookGraphQLController</code>, then read the matching method in <code>CatalogDataService</code>.</li>
       <li><strong>Go deeper on methods.</strong> <code>ARCHITECTURE_AND_METHODS.md</code> explains each method in more detail.</li>
       <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>saveBook</code> derives IDs from map size (fine for a demo, collision-prone in general), and the multicast event sink drops events emitted while nobody is subscribed.</li>
-      <li><strong>Next real-world steps.</strong> Persist to a database, add authentication and field-level authorization, add persisted queries (APQ), and try <code>@defer</code>/<code>@stream</code> incremental delivery.</li>
+      <li><strong>Next real-world steps.</strong> Persist to a database, replace the in-memory user store with a real identity provider, add persisted queries (APQ), and try <code>@defer</code>/<code>@stream</code> incremental delivery.</li>
     </ul>
   </section>
 
   <section id="glossary">
-    <h2>22. Glossary</h2>
+    <h2>23. Glossary</h2>
     <table>
       <thead><tr><th>Term</th><th>Definition</th></tr></thead>
       <tbody>
@@ -1001,6 +1085,10 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
         <tr><td><strong>Custom scalar</strong></td><td>A scalar with application-defined coercion, e.g. <code>DateTime</code> or <code>URL</code>.</td></tr>
         <tr><td><strong>Connection / cursor</strong></td><td>Relay-style pagination in which each edge carries an opaque cursor used to resume.</td></tr>
         <tr><td><strong>Instrumentation</strong></td><td>A graphql-java hook that can observe or alter execution; used here for the depth, complexity, and length limits.</td></tr>
+        <tr><td><strong>JWT</strong></td><td>A signed, self-contained token carrying claims such as subject, roles, and expiry that the resource server validates.</td></tr>
+        <tr><td><strong>Bearer token</strong></td><td>A token presented in the <code>Authorization: Bearer &lt;token&gt;</code> header.</td></tr>
+        <tr><td><strong>Authority / role</strong></td><td>A granted permission such as <code>ROLE_ADMIN</code>, checked by <code>@PreAuthorize</code>.</td></tr>
+        <tr><td><strong>Field-level authorization</strong></td><td>Guarding an individual schema field, here via <code>@PreAuthorize</code> on a <code>@SchemaMapping</code>.</td></tr>
       </tbody>
     </table>
   </section>

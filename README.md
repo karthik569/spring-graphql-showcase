@@ -1,6 +1,6 @@
 # Spring for GraphQL Schema-First Showcase 🌌
 
-A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed GraphQL errors, real-time updates over WebSocket, and query limits with request metrics.
+A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed GraphQL errors, real-time updates over WebSocket, query limits with request metrics, and JWT bearer authorization with operation- and field-level rules.
 
 > 📖 **New to Spring GraphQL or this repo?** Start with the [Getting Started guide](GETTING_STARTED.html).
 
@@ -15,6 +15,8 @@ A production-grade GraphQL server implementing **Schema-First Design**, `@QueryM
 - **`Optional<Book> bookById(String id)`**: `@QueryMapping`; resolves a single book by identifier.
 - **`List<Publication> publications()` / `Optional<Magazine> magazineById(String id)`**: `@QueryMapping`; resolves books and magazines polymorphically through the `Publication` interface.
 - **`List<Object> search(String text)`**: `@QueryMapping`; returns the `SearchResult` union of books, magazines, and authors.
+- **`AuthorConnection authorConnection(Integer first, String after)` / `PublicationConnection publicationConnection(Integer first, String after)`**: `@QueryMapping`; cursor pagination for authors and for every publication.
+- **`List<Magazine> magazinesPublishedAfter(Instant since)`**: `@QueryMapping`; filters magazines using the `DateTime` custom scalar as an argument.
 - **`List<Author> authors()` / `Optional<Author> authorById(String id)`**: `@QueryMapping`; resolve author queries.
 - **`Book addBook(BookInput input)`**: `@MutationMapping`; validates and creates a new book, then publishes a `bookAdded` event.
 - **`Book updateBook(String id, BookUpdateInput input)`**: `@MutationMapping`; partial update — only the fields present in the input change.
@@ -26,7 +28,11 @@ A production-grade GraphQL server implementing **Schema-First Design**, `@QueryM
 - **`GraphQlScalarConfig`**: registers the hand-written `DateTime` (ISO-8601) and `URL` custom scalars.
 - **`GraphQlLimitsConfiguration`**: `Instrumentation` beans enforcing max query depth, complexity, and length (see `graphql.limits`).
 - **`GraphQlRequestInterceptor`**: logs each operation with its duration and records a Micrometer `graphql.request.duration` timer. Spring Boot additionally auto-instruments GraphQL requests as `graphql.request`.
-- **`GraphQlExceptionResolver`**: maps `BookNotFoundException` / `AuthorNotFoundException` to NOT_FOUND and `InvalidBookInputException` to BAD_REQUEST.
+- **`AuthPayload login(String username, String password)`** (`AuthController`): `@MutationMapping`; the one public write, issuing a signed JWT.
+- **`double costPrice(Book)` / `String email(Author)`**: `@SchemaMapping`; computed fields guarded by `@PreAuthorize` (ADMIN and any authenticated user respectively).
+- **`GraphQlExceptionResolver`**: maps `BookNotFoundException` / `AuthorNotFoundException` to NOT_FOUND, `InvalidBookInputException` to BAD_REQUEST, and access failures to UNAUTHORIZED / FORBIDDEN.
+
+Authorization rules: reads are public; `addBook`, `updateBook`, and `updateStock` require an authenticated user; `deleteBook` requires the ADMIN role.
 
 ---
 
@@ -81,3 +87,22 @@ curl -i -X POST http://localhost:8086/graphql \
 #
 # subscription { bookAdded { id title } }
 ```
+
+---
+
+### 5. Log In for a JWT, Then Call a Protected Mutation
+```bash
+# Public login (dev users: user/password and admin/admin)
+TOKEN=$(curl -s -X POST http://localhost:8086/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"mutation { login(username: \"user\", password: \"password\") { accessToken } }"}' \
+  | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+# Reads stay public; writes need the bearer token
+curl -i -X POST http://localhost:8086/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"query":"mutation { addBook(input: {title: \"Cloud Native Java\", pages: 450, price: 59.0, stock: 12, authorId: \"author-1\"}) { id title } }"}'
+```
+
+> **Dev-only settings**: `security.jwt.secret` in `application.yml` is a placeholder and the demo users are in-memory. Override the secret (and replace the user store) before any real deployment.
