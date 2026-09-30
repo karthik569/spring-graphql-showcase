@@ -7,6 +7,7 @@ type Query {
     publications: [Publication!]!
     magazineById(id: ID!): Magazine
     search(text: String!): [SearchResult!]!
+    bookConnection(first: Int, after: String, filter: BookFilter, sort: BookSort): BookConnection!
 }
 
 type Mutation {
@@ -47,6 +48,24 @@ type Magazine implements Publication {
 }
 
 union SearchResult = Book | Magazine | Author
+
+type BookConnection {
+    edges: [BookEdge!]!
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+
+type BookEdge {
+    node: Book!
+    cursor: String!
+}
+
+type PageInfo {
+    hasNextPage: Boolean!
+    hasPreviousPage: Boolean!
+    startCursor: String
+    endCursor: String
+}
 
 type Author {
     id: ID!

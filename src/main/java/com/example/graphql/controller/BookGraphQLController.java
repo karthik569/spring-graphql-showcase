@@ -3,6 +3,7 @@ package com.example.graphql.controller;
 import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
+import com.example.graphql.model.BookConnection;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookInput;
 import com.example.graphql.model.BookSort;
@@ -86,6 +87,24 @@ public class BookGraphQLController {
         int count = catalogService.countBooks(filter);
         log.info("Query 'bookCount' filter={} -> {}", filter, count);
         return count;
+    }
+
+    /**
+     * Resolves the Relay-style {@code bookConnection(first: Int, after: String, ...)} query.
+     *
+     * @param first  optional page size (defaults to 20)
+     * @param after  optional opaque cursor to resume from
+     * @param filter optional filter on title, author, price, and stock
+     * @param sort   optional sort order (defaults to title ascending)
+     * @return a {@link BookConnection} of edges with cursors plus page information
+     */
+    @QueryMapping
+    public BookConnection bookConnection(@Argument Integer first, @Argument String after,
+                                         @Argument BookFilter filter, @Argument BookSort sort) {
+        BookConnection connection = catalogService.bookConnection(first, after, filter, sort);
+        log.info("Query 'bookConnection' first={} after={} -> {} edge(s) of {} total",
+                first, after, connection.edges().size(), connection.totalCount());
+        return connection;
     }
 
     /**

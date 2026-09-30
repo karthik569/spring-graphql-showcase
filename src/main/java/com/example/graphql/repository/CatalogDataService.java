@@ -6,16 +6,20 @@ import com.example.graphql.exception.BookNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
+import com.example.graphql.model.BookConnection;
+import com.example.graphql.model.BookEdge;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.model.Magazine;
+import com.example.graphql.model.PageInfo;
 import com.example.graphql.model.Publication;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +30,9 @@ import java.util.stream.Stream;
 public class CatalogDataService {
 
     private static final Logger log = LoggerFactory.getLogger(CatalogDataService.class);
+
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final String CURSOR_PREFIX = "offset:";
 
     private final Map<String, Book> books = new ConcurrentHashMap<>();
     private final Map<String, Author> authors = new ConcurrentHashMap<>();
@@ -116,6 +123,54 @@ public class CatalogDataService {
 
     public int countBooks(BookFilter filter) {
         return (int) filtered(filter).count();
+    }
+
+    /**
+     * Relay-style cursor pagination: opaque base64 cursors wrap the 1-based position of each edge,
+     * so {@code after} simply resumes at the following offset.
+     */
+    public BookConnection bookConnection(Integer first, String after, BookFilter filter, BookSort sort) {
+        List<Book> all = filtered(filter).sorted(comparator(sort)).toList();
+        int total = all.size();
+
+        int offset = decodeCursor(after);
+        if (offset < 0) {
+            offset = 0;
+        }
+        if (offset > total) {
+            offset = total;
+        }
+        int size = first == null ? DEFAULT_PAGE_SIZE : Math.max(0, first);
+        int end = Math.min(offset + size, total);
+
+        List<BookEdge> edges = new ArrayList<>();
+        for (int i = offset; i < end; i++) {
+            edges.add(new BookEdge(all.get(i), encodeCursor(i + 1)));
+        }
+
+        String startCursor = edges.isEmpty() ? null : edges.get(0).cursor();
+        String endCursor = edges.isEmpty() ? null : edges.get(edges.size() - 1).cursor();
+        PageInfo pageInfo = new PageInfo(end < total, offset > 0, startCursor, endCursor);
+        return new BookConnection(edges, pageInfo, total);
+    }
+
+    private static String encodeCursor(int position) {
+        return Base64.getEncoder().encodeToString(("offset:" + position).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static int decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return 0;
+        }
+        try {
+            String decoded = new String(Base64.getDecoder().decode(cursor), StandardCharsets.UTF_8);
+            if (decoded.startsWith(CURSOR_PREFIX)) {
+                return Integer.parseInt(decoded.substring(CURSOR_PREFIX.length()));
+            }
+        } catch (IllegalArgumentException ignored) {
+            // an unparseable cursor falls back to the start of the list
+        }
+        return 0;
     }
 
     private Stream<Book> filtered(BookFilter filter) {
