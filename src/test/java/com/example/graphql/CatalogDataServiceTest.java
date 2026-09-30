@@ -15,8 +15,10 @@ import com.example.graphql.model.Magazine;
 import com.example.graphql.model.Publication;
 import com.example.graphql.model.PublicationConnection;
 import com.example.graphql.repository.CatalogDataService;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,16 +27,15 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@SpringBootTest
+@Transactional
 class CatalogDataServiceTest {
 
-    private BookEventPublisher publisher;
+    @Autowired
     private CatalogDataService service;
 
-    @BeforeEach
-    void setUp() {
-        publisher = new BookEventPublisher();
-        service = new CatalogDataService(publisher);
-    }
+    @Autowired
+    private BookEventPublisher publisher;
 
     @Test
     void testGetAllBooks() {
