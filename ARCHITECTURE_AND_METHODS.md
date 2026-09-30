@@ -18,6 +18,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 9. **Hardening & observability**: Query depth, complexity, and length limits plus request logging and Micrometer metrics.
 10. **Authorization**: JWT bearer tokens issued by a public `login` mutation, with `@PreAuthorize` rules on writes and on sensitive fields.
 11. **More connections & scalar input**: Cursor connections for authors and publications, and `DateTime` used as a query argument.
+12. **Error-as-data**: An `addBookResult` mutation returning `Book | ValidationFailed`, so failures arrive as data instead of GraphQL errors.
+13. **Persisted queries & WebSocket auth**: Apollo-style automatic persisted queries, and bearer-token authentication for subscriptions.
 
 ```
  [GraphQL Client / GraphiQL IDE]
@@ -81,6 +83,11 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`Book addBook(@Argument BookInput input)`**:
   - *Annotation*: `@MutationMapping`.
   - *Operation*: Validates and saves a new book, then publishes a `bookAdded` event.
+- **`Object addBookResult(@Argument BookInput input)`**:
+  - *Annotation*: `@MutationMapping`.
+  - *Operation*: The error-as-data counterpart of `addBook`. Returns the created `Book`, or a `ValidationFailed` when `InvalidBookInputException` (carrying the offending `field`) or `AuthorNotFoundException` is caught — so the client handles both union members and sees no `errors` entry.
+- **Authorization on writes**:
+  - `@PreAuthorize("isAuthenticated()")` on `addBook`, `addBookResult`, `updateBook`, and `updateStock`; `@PreAuthorize("hasRole('ADMIN')")` on `deleteBook` and `Book.costPrice`.
 - **`Book updateBook(@Argument String id, @Argument BookUpdateInput input)`**:
   - *Annotation*: `@MutationMapping`.
   - *Operation*: Resolves `updateBook(id: ID!, input: BookUpdateInput!): Book!` as a partial patch — each nullable input field falls back to the existing value.
@@ -96,9 +103,9 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`Map<Author, List<Book>> books(List<Author> authors)`**:
   - *Annotation*: `@BatchMapping(typeName = "Author", field = "books")`.
   - *Reverse N+1 Solution*: The mirror image. For `query { authors { books { title } } }` the engine collects every parent author and calls this method once with the whole list. Authors without books map to an empty list, so the non-null `[Book!]!` schema type is always satisfied.
-- **`Flux<Book> bookAdded()`**:
+- **`Flux<Book> bookAdded(GraphQLContext context)`**:
   - *Annotation*: `@SubscriptionMapping`.
-  - *Operation*: Streams newly created books to subscribed clients over WebSocket, backed by `BookEventPublisher`.
+  - *Operation*: Streams newly created books to subscribed clients over WebSocket, backed by `BookEventPublisher`. Requires an authenticated connection: the `WebSocketAuthInterceptor` publishes the authentication into the GraphQL context, and this method rejects the subscription when it is absent.
 
 ---
 
@@ -166,3 +173,15 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 #### `AuthController`
 - *Annotation*: `@Controller` with a `@MutationMapping`.
 - *Operation*: Resolves the public `login(username, password)` mutation: authenticates through the `AuthenticationManager`, then mints a JWT carrying `sub`, `roles`, and an expiry, returning an `AuthPayload`.
+
+#### `WebSocketAuthInterceptor`
+- *Annotation*: `@Component implementing WebSocketGraphQlInterceptor` (the single WebSocket interceptor in the chain).
+- *Operation*: Validates the bearer token from the WebSocket handshake with the `JwtDecoder` and writes the resulting `JwtAuthenticationToken` into the GraphQL context via `configureExecutionInput`, where `bookAdded` picks it up. Subscriptions bypass `@PreAuthorize` because WebSocket messages run outside the servlet security context.
+
+#### `PersistedQueryInterceptor` / `PersistedQueryStore`
+- *Annotation*: `@Component implementing WebGraphQlInterceptor` plus a bounded in-memory store.
+- *Operation*: Implements Apollo-style APQ. A document sent with `extensions.persistedQuery.sha256Hash` is registered (after verifying the hash); a later hash-only request has its document substituted via `configureExecutionInput`; an unknown hash is reported as `PersistedQueryNotFound`, and a hash that does not match its document is rejected.
+
+#### `SubscriptionExceptionResolver`
+- *Annotation*: `@Bean` in `SecurityConfig`.
+- *Operation*: Subscription failures are resolved separately from data fetcher exceptions, so the `AccessDeniedException` → UNAUTHORIZED mapping is registered here as well; otherwise a denied subscription surfaces as an opaque INTERNAL_ERROR.

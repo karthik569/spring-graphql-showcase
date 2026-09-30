@@ -1,6 +1,6 @@
 # Spring for GraphQL Schema-First Showcase 🌌
 
-A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed GraphQL errors, real-time updates over WebSocket, query limits with request metrics, and JWT bearer authorization with operation- and field-level rules.
+A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed errors and error-as-data result unions, real-time updates over WebSocket, query limits with request metrics, automatic persisted queries, and JWT bearer authorization with operation- and field-level rules.
 
 > 📖 **New to Spring GraphQL or this repo?** Start with the [Getting Started guide](GETTING_STARTED.html).
 
@@ -24,15 +24,20 @@ A production-grade GraphQL server implementing **Schema-First Design**, `@QueryM
 - **`Book updateStock(String id, int stock)`**: `@MutationMapping`; legacy stock updater, marked `@deprecated` in the schema in favour of `updateBook`.
 - **`Map<Book, Author> author(List<Book> books)`**: `@BatchMapping`; **solves the N+1 problem** by batching author lookups across books into a single DataLoader round-trip.
 - **`Map<Author, List<Book>> books(List<Author> authors)`**: `@BatchMapping`; **solves the N+1 problem in reverse**, batching book lookups across authors.
-- **`Flux<Book> bookAdded()`**: `@SubscriptionMapping`; streams newly created books to subscribers over WebSocket.
+- **`Flux<Book> bookAdded(GraphQlContext)`**: `@SubscriptionMapping`; streams newly created books over WebSocket and requires an authenticated connection.
 - **`GraphQlScalarConfig`**: registers the hand-written `DateTime` (ISO-8601) and `URL` custom scalars.
 - **`GraphQlLimitsConfiguration`**: `Instrumentation` beans enforcing max query depth, complexity, and length (see `graphql.limits`).
 - **`GraphQlRequestInterceptor`**: logs each operation with its duration and records a Micrometer `graphql.request.duration` timer. Spring Boot additionally auto-instruments GraphQL requests as `graphql.request`.
 - **`AuthPayload login(String username, String password)`** (`AuthController`): `@MutationMapping`; the one public write, issuing a signed JWT.
 - **`double costPrice(Book)` / `String email(Author)`**: `@SchemaMapping`; computed fields guarded by `@PreAuthorize` (ADMIN and any authenticated user respectively).
 - **`GraphQlExceptionResolver`**: maps `BookNotFoundException` / `AuthorNotFoundException` to NOT_FOUND, `InvalidBookInputException` to BAD_REQUEST, and access failures to UNAUTHORIZED / FORBIDDEN.
+- **`Object addBookResult(BookInput input)`**: `@MutationMapping`; the error-as-data counterpart of `addBook`, returning `Book | ValidationFailed` as data rather than a GraphQL error.
+- **`WebSocketAuthInterceptor`**: validates the bearer token on the WebSocket handshake and publishes the authentication into the GraphQL context, which `bookAdded` requires.
+- **`PersistedQueryInterceptor` / `PersistedQueryStore`**: Apollo-style APQ — register a document under its hash, then resolve it from the hash alone.
 
-Authorization rules: reads are public; `addBook`, `updateBook`, and `updateStock` require an authenticated user; `deleteBook` requires the ADMIN role.
+Authorization rules: reads are public; `addBook`, `addBookResult`, `updateBook`, and `updateStock` require an authenticated user; `deleteBook` requires the ADMIN role; the `bookAdded` subscription requires an authenticated WebSocket connection.
+
+> **Not supported on this stack**: `@defer`/`@stream` (Spring for GraphQL 1.3 has no incremental-delivery transport) and GraphQL over HTTP GET (the transport is POST-only).
 
 ---
 
@@ -106,3 +111,21 @@ curl -i -X POST http://localhost:8086/graphql \
 ```
 
 > **Dev-only settings**: `security.jwt.secret` in `application.yml` is a placeholder and the demo users are in-memory. Override the secret (and replace the user store) before any real deployment.
+
+---
+
+### 6. Errors as Data, and Persisted Queries
+```bash
+# addBookResult returns the failure as data instead of a GraphQL error
+curl -s -X POST http://localhost:8086/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"query":"mutation { addBookResult(input: {title: \"Bad\", pages: 0, price: 1.0, stock: 1, authorId: \"author-1\"}) { __typename ... on Book { id } ... on ValidationFailed { field message } } }"}'
+
+# APQ: register a query under its SHA-256 hash, then call it by hash alone
+HASH=$(printf 'query { bookCount }' | sha256sum | cut -d' ' -f1)
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d "{\"query\":\"query { bookCount }\",\"extensions\":{\"persistedQuery\":{\"sha256Hash\":\"$HASH\"}}}"
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d "{\"extensions\":{\"persistedQuery\":{\"sha256Hash\":\"$HASH\"}}}"
+```
