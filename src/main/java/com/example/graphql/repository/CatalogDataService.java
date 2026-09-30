@@ -1,5 +1,6 @@
 package com.example.graphql.repository;
 
+import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.exception.AuthorNotFoundException;
 import com.example.graphql.exception.BookNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
@@ -24,8 +25,11 @@ public class CatalogDataService {
 
     private final Map<String, Book> books = new ConcurrentHashMap<>();
     private final Map<String, Author> authors = new ConcurrentHashMap<>();
+    private final BookEventPublisher publisher;
 
-    public CatalogDataService() {
+    public CatalogDataService(BookEventPublisher publisher) {
+        this.publisher = publisher;
+
         authors.put("author-1", new Author("author-1", "Joshua Bloch", "USA"));
         authors.put("author-2", new Author("author-2", "Martin Fowler", "UK"));
         authors.put("author-3", new Author("author-3", "Robert C. Martin", "USA"));
@@ -151,6 +155,7 @@ public class CatalogDataService {
         String id = "book-" + (books.size() + 1);
         Book book = new Book(id, title, pages, price, stock, authorId);
         books.put(id, book);
+        publisher.publish(book);
         return book;
     }
 

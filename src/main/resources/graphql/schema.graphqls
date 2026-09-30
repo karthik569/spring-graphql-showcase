@@ -13,6 +13,10 @@ type Mutation {
     updateStock(id: ID!, stock: Int!): Book! @deprecated(reason: "Use updateBook instead")
 }
 
+type Subscription {
+    bookAdded: Book!
+}
+
 type Book {
     id: ID!
     title: String!

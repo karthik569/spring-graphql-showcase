@@ -1,5 +1,6 @@
 package com.example.graphql.controller;
 
+import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookFilter;
@@ -13,7 +14,9 @@ import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.MutationMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
+import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
 import org.springframework.stereotype.Controller;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +29,8 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link QueryMapping}: Resolves top-level GraphQL queries (e.g. {@code books}, {@code bookById})</li>
  *   <li>{@link MutationMapping}: Resolves data modification operations (e.g. {@code addBook}, {@code updateStock})</li>
- *   <li>{@link BatchMapping}: **Solves the N+1 database problem** by batch loading authors across books in a single DataLoader round-trip</li>
+ *   <li>{@link BatchMapping}: **Solves the N+1 database problem** by batch loading relationships in a single DataLoader round-trip, in both directions ({@code Book.author} and {@code Author.books})</li>
+ *   <li>{@link SubscriptionMapping}: Streams new books to subscribed clients over WebSocket</li>
  * </ul>
  *
  * @author Spring Showcase Team
@@ -38,14 +42,17 @@ public class BookGraphQLController {
     private static final Logger log = LoggerFactory.getLogger(BookGraphQLController.class);
 
     private final CatalogDataService catalogService;
+    private final BookEventPublisher publisher;
 
     /**
-     * Constructs the GraphQL controller with the catalog data repository.
+     * Constructs the GraphQL controller with the catalog data repository and the book event publisher.
      *
      * @param catalogService data service providing book and author records
+     * @param publisher      publisher emitting newly created books to subscribers
      */
-    public BookGraphQLController(CatalogDataService catalogService) {
+    public BookGraphQLController(CatalogDataService catalogService, BookEventPublisher publisher) {
         this.catalogService = catalogService;
+        this.publisher = publisher;
     }
 
     /**
@@ -207,5 +214,15 @@ public class BookGraphQLController {
     @BatchMapping(typeName = "Author", field = "books")
     public Map<Author, List<Book>> books(List<Author> authors) {
         return catalogService.getBooksForAuthors(authors);
+    }
+
+    /**
+     * Subscription stream of newly created books, pushed to subscribed clients over WebSocket.
+     *
+     * @return a hot {@link Flux} emitting every book added after the client subscribes
+     */
+    @SubscriptionMapping
+    public Flux<Book> bookAdded() {
+        return publisher.stream();
     }
 }

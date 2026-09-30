@@ -8,6 +8,8 @@ spring:
     graphiql:
       enabled: true
       path: /graphiql
+    websocket:
+      path: /graphql
     cors:
       allowed-origins: "*"
 

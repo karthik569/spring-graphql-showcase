@@ -1,5 +1,6 @@
 package com.example.graphql;
 
+import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
 import com.example.graphql.repository.CatalogDataService;
@@ -17,7 +18,7 @@ class CatalogDataServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CatalogDataService();
+        service = new CatalogDataService(new BookEventPublisher());
     }
 
     @Test
