@@ -35,6 +35,13 @@ type Subscription {
 scalar DateTime
 scalar URL
 
+directive @auth(requires: Role = USER) on FIELD_DEFINITION
+
+enum Role {
+    USER
+    ADMIN
+}
+
 interface Publication {
     id: ID!
     title: String!
@@ -46,7 +53,7 @@ type Book implements Publication {
     pages: Int!
     price: Float!
     stock: Int!
-    costPrice: Float!
+    costPrice: Float! @auth(requires: ADMIN)
     author: Author
 }
 
@@ -114,6 +121,7 @@ type Author {
     country: String!
     email: String!
     books: [Book!]!
+    bookConnection(first: Int, after: String): BookConnection!
 }
 
 input BookInput {

@@ -162,6 +162,23 @@ public class CatalogDataService {
     }
 
     /**
+     * Cursor pagination for a single author's books. Takes arguments, so unlike the batched
+     * {@code Author.books} it cannot be resolved in one call for many parents.
+     */
+    public BookConnection authorBookConnection(String authorId, Integer first, String after) {
+        List<Book> all = books.findByAuthorIds(List.of(authorId));
+        Page page = page(all.size(), first, after);
+
+        List<BookEdge> edges = new ArrayList<>();
+        for (int i = page.offset(); i < page.end(); i++) {
+            edges.add(new BookEdge(all.get(i), encodeCursor(i + 1)));
+        }
+        String startCursor = edges.isEmpty() ? null : edges.get(0).cursor();
+        String endCursor = edges.isEmpty() ? null : edges.get(edges.size() - 1).cursor();
+        return new BookConnection(edges, pageInfo(startCursor, endCursor, page, all.size()), all.size());
+    }
+
+    /**
      * Forward batch loader: resolves the author for every book in a single query.
      */
     public Map<Book, Author> getAuthorsForBooks(List<Book> bookList) {

@@ -910,6 +910,31 @@ class BookGraphQLIntegrationTest {
         assertThat(field).isEqualTo("authorId");
     }
 
+    @Test
+    void authorBooksCanBePagedThroughANestedConnection() {
+        BookConnectionView connection = graphQlTester.document("""
+                        query {
+                          authorById(id: "author-1") {
+                            name
+                            bookConnection(first: 1) {
+                              edges { cursor node { title } }
+                              pageInfo { hasNextPage endCursor }
+                              totalCount
+                            }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("authorById.bookConnection")
+                .entity(BookConnectionView.class)
+                .get();
+
+        assertThat(connection.edges()).hasSize(1);
+        assertThat(connection.totalCount()).isGreaterThanOrEqualTo(2);
+        assertThat(connection.pageInfo().hasNextPage()).isTrue();
+        assertThat(connection.pageInfo().endCursor()).isNotBlank();
+    }
+
     private List<String> titles(String document) {
         return graphQlTester.document(document)
                 .execute()

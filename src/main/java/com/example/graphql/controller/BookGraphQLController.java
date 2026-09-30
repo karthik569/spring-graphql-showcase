@@ -335,14 +335,14 @@ public class BookGraphQLController {
     }
 
     /**
-     * Field-level authorization: the internal cost price is visible only to administrators. Because
-     * the field is non-null, a denied read also demonstrates non-null error propagation.
+     * The internal cost price, guarded by the schema-declared {@code @auth(requires: ADMIN)} directive
+     * rather than a method annotation. Because the field is non-null, a denied read also demonstrates
+     * non-null error propagation.
      *
      * @param book the parent book
      * @return the derived internal cost price
      */
     @SchemaMapping(typeName = "Book", field = "costPrice")
-    @PreAuthorize("hasRole('ADMIN')")
     public double costPrice(Book book) {
         return Math.round(book.price() * 0.6 * 100.0) / 100.0;
     }
@@ -357,6 +357,24 @@ public class BookGraphQLController {
     @PreAuthorize("isAuthenticated()")
     public String email(Author author) {
         return author.name().toLowerCase(Locale.ROOT).replaceAll("[^a-z]+", ".") + "@example.com";
+    }
+
+    /**
+     * Nested pagination for one author's books. Unlike {@link #books(List)} this takes arguments, so
+     * it cannot be batch-resolved — it is deliberately a per-author query, and {@code Author.books}
+     * remains the batched alternative.
+     *
+     * @param author the parent author
+     * @param first  optional page size (defaults to 20)
+     * @param after  optional opaque cursor to resume from
+     * @return that author's books as a connection
+     */
+    @SchemaMapping(typeName = "Author", field = "bookConnection")
+    public BookConnection authorBookConnection(Author author, @Argument Integer first, @Argument String after) {
+        BookConnection connection = catalogService.authorBookConnection(author.id(), first, after);
+        log.info("Field 'Author.bookConnection' author='{}' first={} after={} -> {} edge(s)",
+                author.id(), first, after, connection.edges().size());
+        return connection;
     }
 
     /**

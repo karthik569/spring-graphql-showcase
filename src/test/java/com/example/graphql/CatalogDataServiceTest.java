@@ -261,6 +261,15 @@ class CatalogDataServiceTest {
     }
 
     @Test
+    void testAuthorBookConnectionPagesOneAuthorsBooks() {
+        BookConnection connection = service.authorBookConnection("author-1", 1, null);
+
+        assertEquals(1, connection.edges().size());
+        assertEquals(2, connection.totalCount());
+        assertTrue(connection.pageInfo().hasNextPage());
+    }
+
+    @Test
     void testValidationExceptionCarriesTheField() {
         InvalidBookInputException ex = assertThrows(InvalidBookInputException.class,
                 () -> service.saveBook("Fine", 0, 10.0, 1, "author-1"));
