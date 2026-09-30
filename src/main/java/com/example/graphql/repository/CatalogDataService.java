@@ -9,10 +9,14 @@ import com.example.graphql.model.Book;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
+import com.example.graphql.model.Magazine;
+import com.example.graphql.model.Publication;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -25,6 +29,7 @@ public class CatalogDataService {
 
     private final Map<String, Book> books = new ConcurrentHashMap<>();
     private final Map<String, Author> authors = new ConcurrentHashMap<>();
+    private final Map<String, Magazine> magazines = new ConcurrentHashMap<>();
     private final BookEventPublisher publisher;
 
     public CatalogDataService(BookEventPublisher publisher) {
@@ -38,6 +43,11 @@ public class CatalogDataService {
         books.put("book-2", new Book("book-2", "Refactoring", 448, 55.0, 30, "author-2"));
         books.put("book-3", new Book("book-3", "Clean Code", 464, 40.0, 75, "author-3"));
         books.put("book-4", new Book("book-4", "Java Puzzlers", 312, 35.0, 20, "author-1"));
+
+        magazines.put("magazine-1", new Magazine("magazine-1", "Java Magazine", 42, "Oracle",
+                Instant.parse("2024-05-01T00:00:00Z"), URI.create("https://javamagazine.example.com")));
+        magazines.put("magazine-2", new Magazine("magazine-2", "GraphQL Weekly", 7, "GraphQL Foundation",
+                Instant.parse("2024-06-15T00:00:00Z"), URI.create("https://graphqlweekly.example.com")));
     }
 
     public List<Book> getAllBooks() {
@@ -54,6 +64,40 @@ public class CatalogDataService {
 
     public Optional<Author> getAuthorById(String id) {
         return Optional.ofNullable(authors.get(id));
+    }
+
+    public Optional<Magazine> getMagazineById(String id) {
+        return Optional.ofNullable(magazines.get(id));
+    }
+
+    /**
+     * Returns every publication regardless of concrete type: books and magazines share the
+     * {@link Publication} interface, which the GraphQL schema exposes as an interface too.
+     */
+    public List<Publication> getPublications() {
+        List<Publication> publications = new ArrayList<>();
+        publications.addAll(books.values());
+        publications.addAll(magazines.values());
+        return publications;
+    }
+
+    /**
+     * Case-insensitive search across book titles, magazine titles, and author names.
+     * The heterogeneous result list backs the GraphQL {@code SearchResult} union.
+     */
+    public List<Object> search(String text) {
+        String needle = text == null ? "" : text.toLowerCase(Locale.ROOT);
+        List<Object> results = new ArrayList<>();
+        books.values().stream()
+                .filter(book -> book.title().toLowerCase(Locale.ROOT).contains(needle))
+                .forEach(results::add);
+        magazines.values().stream()
+                .filter(magazine -> magazine.title().toLowerCase(Locale.ROOT).contains(needle))
+                .forEach(results::add);
+        authors.values().stream()
+                .filter(author -> author.name().toLowerCase(Locale.ROOT).contains(needle))
+                .forEach(results::add);
+        return results;
     }
 
     /**

@@ -7,6 +7,8 @@ import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookInput;
 import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
+import com.example.graphql.model.Magazine;
+import com.example.graphql.model.Publication;
 import com.example.graphql.repository.CatalogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,6 +124,45 @@ public class BookGraphQLController {
         Optional<Author> author = catalogService.getAuthorById(id);
         log.info("Query 'authorById' id='{}' -> {}", id, author.map(Author::name).orElse("not found"));
         return author;
+    }
+
+    /**
+     * Resolves the {@code publications} query returning books and magazines through the
+     * {@code Publication} interface.
+     *
+     * @return every publication, of mixed concrete types
+     */
+    @QueryMapping
+    public List<Publication> publications() {
+        List<Publication> publications = catalogService.getPublications();
+        log.info("Query 'publications' -> returning {} publication(s)", publications.size());
+        return publications;
+    }
+
+    /**
+     * Resolves the {@code magazineById(id: ID!)} query.
+     *
+     * @param id the magazine unique identifier
+     * @return optional containing the matching {@link Magazine}
+     */
+    @QueryMapping
+    public Optional<Magazine> magazineById(@Argument String id) {
+        Optional<Magazine> magazine = catalogService.getMagazineById(id);
+        log.info("Query 'magazineById' id='{}' -> {}", id, magazine.map(Magazine::title).orElse("not found"));
+        return magazine;
+    }
+
+    /**
+     * Resolves the {@code search(text: String!)} query returning the {@code SearchResult} union.
+     *
+     * @param text case-insensitive text matched against book and magazine titles and author names
+     * @return heterogeneous results resolved to their concrete types
+     */
+    @QueryMapping
+    public List<Object> search(@Argument String text) {
+        List<Object> results = catalogService.search(text);
+        log.info("Query 'search' text='{}' -> {} result(s)", text, results.size());
+        return results;
     }
 
     /**

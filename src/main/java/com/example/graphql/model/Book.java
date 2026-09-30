@@ -7,4 +7,4 @@ public record Book(
         double price,
         int stock,
         String authorId
-) {}
+) implements Publication {}

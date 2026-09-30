@@ -4,6 +4,9 @@ type Query {
     bookById(id: ID!): Book
     authors: [Author!]!
     authorById(id: ID!): Author
+    publications: [Publication!]!
+    magazineById(id: ID!): Magazine
+    search(text: String!): [SearchResult!]!
 }
 
 type Mutation {
@@ -17,7 +20,15 @@ type Subscription {
     bookAdded: Book!
 }
 
-type Book {
+scalar DateTime
+scalar URL
+
+interface Publication {
+    id: ID!
+    title: String!
+}
+
+type Book implements Publication {
     id: ID!
     title: String!
     pages: Int!
@@ -25,6 +36,17 @@ type Book {
     stock: Int!
     author: Author
 }
+
+type Magazine implements Publication {
+    id: ID!
+    title: String!
+    issueNumber: Int!
+    publisher: String!
+    publishedOn: DateTime!
+    website: URL
+}
+
+union SearchResult = Book | Magazine | Author
 
 type Author {
     id: ID!
