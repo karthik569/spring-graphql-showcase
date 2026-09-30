@@ -10,9 +10,13 @@ import org.springframework.graphql.test.tester.HttpGraphQlTester;
 import org.springframework.graphql.test.tester.WebSocketGraphQlTester;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -1020,6 +1024,70 @@ class BookGraphQLIntegrationTest {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException(ex);
         }
+    }
+
+    @Test
+    void subscriptionAuthenticatesFromTheConnectionInitPayload() throws Exception {
+        String token = loginToken("user", "password");
+        BlockingQueue<String> received = new LinkedBlockingQueue<>();
+        Disposable session = openRawSubscription("{\"Authorization\":\"Bearer " + token + "\"}", received);
+
+        try {
+            Thread.sleep(1000);
+            addBook(testerFor("user", "password"), "Init Payload Book", 10, 1.0, 1, "author-1");
+
+            String message = awaitMessage(received, "\"type\":\"next\"", Duration.ofSeconds(10));
+            assertThat(message).isNotNull();
+            assertThat(message).contains("Init Payload Book");
+        } finally {
+            session.dispose();
+        }
+    }
+
+    @Test
+    void subscriptionWithoutCredentialsIsRejectedOverWebSocket() throws Exception {
+        BlockingQueue<String> received = new LinkedBlockingQueue<>();
+        Disposable session = openRawSubscription("{}", received);
+
+        try {
+            String message = awaitMessage(received, "\"type\":\"error\"", Duration.ofSeconds(10));
+            assertThat(message).isNotNull();
+            assertThat(message).contains("UNAUTHORIZED");
+        } finally {
+            session.dispose();
+        }
+    }
+
+    /**
+     * Drives the graphql-transport-ws protocol by hand: {@code WebSocketGraphQlTester} cannot set a
+     * {@code connection_init} payload (spring-graphql#823), and that payload is the only way a
+     * browser can pass credentials.
+     */
+    private Disposable openRawSubscription(String connectionInitPayloadJson, BlockingQueue<String> received) {
+        ReactorNettyWebSocketClient client = new ReactorNettyWebSocketClient();
+        return client.execute(URI.create("ws://localhost:" + port + "/graphql"), ws -> {
+            Mono<Void> outbound = ws.send(Flux.concat(
+                    Mono.just(ws.textMessage("{\"type\":\"connection_init\",\"payload\":" + connectionInitPayloadJson + "}")),
+                    Mono.just(ws.textMessage(
+                            "{\"id\":\"1\",\"type\":\"subscribe\",\"payload\":{\"query\":\"subscription { bookAdded { id title } }\"}}"))));
+            Mono<Void> inbound = ws.receive()
+                    .map(WebSocketMessage::getPayloadAsText)
+                    .doOnNext(received::add)
+                    .then();
+            return Mono.when(outbound, inbound);
+        }).subscribe();
+    }
+
+    private String awaitMessage(BlockingQueue<String> received, String marker, Duration timeout)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            String message = received.poll(250, TimeUnit.MILLISECONDS);
+            if (message != null && message.contains(marker)) {
+                return message;
+            }
+        }
+        return null;
     }
 
     private String loginToken(String username, String password) {
