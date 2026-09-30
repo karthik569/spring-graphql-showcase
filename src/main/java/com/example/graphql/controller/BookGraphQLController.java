@@ -2,6 +2,7 @@ package com.example.graphql.controller;
 
 import com.example.graphql.events.BookEventPublisher;
 import com.example.graphql.model.Author;
+import com.example.graphql.model.AuthorConnection;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookConnection;
 import com.example.graphql.model.BookFilter;
@@ -10,6 +11,7 @@ import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.model.Magazine;
 import com.example.graphql.model.Publication;
+import com.example.graphql.model.PublicationConnection;
 import com.example.graphql.repository.CatalogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,6 +108,37 @@ public class BookGraphQLController {
                                          @Argument BookFilter filter, @Argument BookSort sort) {
         BookConnection connection = catalogService.bookConnection(first, after, filter, sort);
         log.info("Query 'bookConnection' first={} after={} -> {} edge(s) of {} total",
+                first, after, connection.edges().size(), connection.totalCount());
+        return connection;
+    }
+
+    /**
+     * Resolves the Relay-style {@code authorConnection(first: Int, after: String)} query.
+     *
+     * @param first optional page size (defaults to 20)
+     * @param after optional opaque cursor to resume from
+     * @return a connection of authors with cursors and page information
+     */
+    @QueryMapping
+    public AuthorConnection authorConnection(@Argument Integer first, @Argument String after) {
+        AuthorConnection connection = catalogService.authorConnection(first, after);
+        log.info("Query 'authorConnection' first={} after={} -> {} edge(s) of {} total",
+                first, after, connection.edges().size(), connection.totalCount());
+        return connection;
+    }
+
+    /**
+     * Resolves the Relay-style {@code publicationConnection(first: Int, after: String)} query, whose
+     * edges carry the {@code Publication} interface.
+     *
+     * @param first optional page size (defaults to 20)
+     * @param after optional opaque cursor to resume from
+     * @return a connection of publications with cursors and page information
+     */
+    @QueryMapping
+    public PublicationConnection publicationConnection(@Argument Integer first, @Argument String after) {
+        PublicationConnection connection = catalogService.publicationConnection(first, after);
+        log.info("Query 'publicationConnection' first={} after={} -> {} edge(s) of {} total",
                 first, after, connection.edges().size(), connection.totalCount());
         return connection;
     }

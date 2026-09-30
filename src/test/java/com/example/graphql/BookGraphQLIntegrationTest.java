@@ -76,6 +76,15 @@ class BookGraphQLIntegrationTest {
     record AuthPayloadView(String accessToken, String tokenType, int expiresIn) {
     }
 
+    record AuthorNode(String id, String name) {
+    }
+
+    record AuthorEdgeView(String cursor, AuthorNode node) {
+    }
+
+    record AuthorConnectionView(List<AuthorEdgeView> edges, PageInfoView pageInfo, int totalCount) {
+    }
+
     @Test
     void graphQlEndpointSpeaksJsonOverHttp() {
         webTestClient.post()
@@ -722,6 +731,73 @@ class BookGraphQLIntegrationTest {
                 .get();
 
         assertThat(email).contains("@example.com");
+    }
+
+    @Test
+    void authorConnectionPagesWithCursors() {
+        AuthorConnectionView firstPage = graphQlTester.document("""
+                        query {
+                          authorConnection(first: 2) {
+                            edges { cursor node { id name } }
+                            pageInfo { hasNextPage hasPreviousPage endCursor }
+                            totalCount
+                          }
+                        }
+                        """)
+                .execute()
+                .path("authorConnection")
+                .entity(AuthorConnectionView.class)
+                .get();
+
+        assertThat(firstPage.edges()).hasSize(2);
+        assertThat(firstPage.totalCount()).isEqualTo(3);
+        assertThat(firstPage.pageInfo().hasNextPage()).isTrue();
+
+        AuthorConnectionView secondPage = graphQlTester.document("""
+                        query ($after: String!) {
+                          authorConnection(first: 2, after: $after) {
+                            edges { node { id } }
+                            pageInfo { hasPreviousPage }
+                            totalCount
+                          }
+                        }
+                        """)
+                .variable("after", firstPage.pageInfo().endCursor())
+                .execute()
+                .path("authorConnection")
+                .entity(AuthorConnectionView.class)
+                .get();
+
+        assertThat(secondPage.edges()).hasSize(1);
+        assertThat(secondPage.pageInfo().hasPreviousPage()).isTrue();
+        assertThat(secondPage.edges().get(0).node().id())
+                .isNotEqualTo(firstPage.edges().get(0).node().id());
+    }
+
+    @Test
+    void publicationConnectionPagesThroughBooksAndMagazines() {
+        Integer total = graphQlTester.document("query { publicationConnection(first: 3) { totalCount } }")
+                .execute()
+                .path("publicationConnection.totalCount")
+                .entity(Integer.class)
+                .get();
+        assertThat(total).isGreaterThanOrEqualTo(6);
+
+        List<String> typenames = graphQlTester.document("""
+                        query {
+                          publicationConnection(first: 3) {
+                            edges { cursor node { __typename } }
+                            pageInfo { hasNextPage endCursor }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("publicationConnection.edges[*].node.__typename")
+                .entityList(String.class)
+                .get();
+
+        assertThat(typenames).hasSize(3);
+        assertThat(typenames).containsAnyOf("Book", "Magazine");
     }
 
     private List<String> titles(String document) {

@@ -8,6 +8,8 @@ type Query {
     magazineById(id: ID!): Magazine
     search(text: String!): [SearchResult!]!
     bookConnection(first: Int, after: String, filter: BookFilter, sort: BookSort): BookConnection!
+    authorConnection(first: Int, after: String): AuthorConnection!
+    publicationConnection(first: Int, after: String): PublicationConnection!
 }
 
 type Mutation {
@@ -73,6 +75,28 @@ type PageInfo {
     hasPreviousPage: Boolean!
     startCursor: String
     endCursor: String
+}
+
+type AuthorConnection {
+    edges: [AuthorEdge!]!
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+
+type AuthorEdge {
+    node: Author!
+    cursor: String!
+}
+
+type PublicationConnection {
+    edges: [PublicationEdge!]!
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+
+type PublicationEdge {
+    node: Publication!
+    cursor: String!
 }
 
 type Author {

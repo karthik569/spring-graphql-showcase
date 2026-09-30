@@ -5,6 +5,7 @@ import com.example.graphql.exception.AuthorNotFoundException;
 import com.example.graphql.exception.BookNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
+import com.example.graphql.model.AuthorConnection;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookConnection;
 import com.example.graphql.model.BookFilter;
@@ -12,6 +13,7 @@ import com.example.graphql.model.BookSort;
 import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.model.Magazine;
 import com.example.graphql.model.Publication;
+import com.example.graphql.model.PublicationConnection;
 import com.example.graphql.repository.CatalogDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -219,5 +221,28 @@ class CatalogDataServiceTest {
 
         assertEquals(1, connection.edges().size());
         assertFalse(connection.pageInfo().hasPreviousPage());
+    }
+
+    @Test
+    void testAuthorConnectionPages() {
+        AuthorConnection firstPage = service.authorConnection(2, null);
+
+        assertEquals(2, firstPage.edges().size());
+        assertEquals(3, firstPage.totalCount());
+        assertTrue(firstPage.pageInfo().hasNextPage());
+
+        AuthorConnection secondPage = service.authorConnection(2, firstPage.pageInfo().endCursor());
+
+        assertEquals(1, secondPage.edges().size());
+        assertTrue(secondPage.pageInfo().hasPreviousPage());
+    }
+
+    @Test
+    void testPublicationConnectionCoversBooksAndMagazines() {
+        PublicationConnection connection = service.publicationConnection(3, null);
+
+        assertEquals(3, connection.edges().size());
+        assertEquals(6, connection.totalCount());
+        assertTrue(connection.pageInfo().hasNextPage());
     }
 }

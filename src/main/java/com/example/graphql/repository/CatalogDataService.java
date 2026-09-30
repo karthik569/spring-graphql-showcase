@@ -5,6 +5,8 @@ import com.example.graphql.exception.AuthorNotFoundException;
 import com.example.graphql.exception.BookNotFoundException;
 import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
+import com.example.graphql.model.AuthorConnection;
+import com.example.graphql.model.AuthorEdge;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookConnection;
 import com.example.graphql.model.BookEdge;
@@ -14,6 +16,8 @@ import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.model.Magazine;
 import com.example.graphql.model.PageInfo;
 import com.example.graphql.model.Publication;
+import com.example.graphql.model.PublicationConnection;
+import com.example.graphql.model.PublicationEdge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -152,6 +156,53 @@ public class CatalogDataService {
         String endCursor = edges.isEmpty() ? null : edges.get(edges.size() - 1).cursor();
         PageInfo pageInfo = new PageInfo(end < total, offset > 0, startCursor, endCursor);
         return new BookConnection(edges, pageInfo, total);
+    }
+
+    /**
+     * Cursor pagination over authors, ordered by name.
+     */
+    public AuthorConnection authorConnection(Integer first, String after) {
+        List<Author> all = new ArrayList<>(authors.values());
+        all.sort(Comparator.comparing(Author::name, String.CASE_INSENSITIVE_ORDER).thenComparing(Author::id));
+        Page page = page(all.size(), first, after);
+
+        List<AuthorEdge> edges = new ArrayList<>();
+        for (int i = page.offset(); i < page.end(); i++) {
+            edges.add(new AuthorEdge(all.get(i), encodeCursor(i + 1)));
+        }
+
+        String startCursor = edges.isEmpty() ? null : edges.get(0).cursor();
+        String endCursor = edges.isEmpty() ? null : edges.get(edges.size() - 1).cursor();
+        PageInfo pageInfo = new PageInfo(page.end() < all.size(), page.offset() > 0, startCursor, endCursor);
+        return new AuthorConnection(edges, pageInfo, all.size());
+    }
+
+    /**
+     * Cursor pagination over every publication (books and magazines), ordered by title.
+     */
+    public PublicationConnection publicationConnection(Integer first, String after) {
+        List<Publication> all = getPublications();
+        all.sort(Comparator.comparing(Publication::title, String.CASE_INSENSITIVE_ORDER).thenComparing(Publication::id));
+        Page page = page(all.size(), first, after);
+
+        List<PublicationEdge> edges = new ArrayList<>();
+        for (int i = page.offset(); i < page.end(); i++) {
+            edges.add(new PublicationEdge(all.get(i), encodeCursor(i + 1)));
+        }
+
+        String startCursor = edges.isEmpty() ? null : edges.get(0).cursor();
+        String endCursor = edges.isEmpty() ? null : edges.get(edges.size() - 1).cursor();
+        PageInfo pageInfo = new PageInfo(page.end() < all.size(), page.offset() > 0, startCursor, endCursor);
+        return new PublicationConnection(edges, pageInfo, all.size());
+    }
+
+    private record Page(int offset, int end) {
+    }
+
+    private static Page page(int total, Integer first, String after) {
+        int offset = Math.max(0, Math.min(decodeCursor(after), total));
+        int size = first == null ? DEFAULT_PAGE_SIZE : Math.max(0, first);
+        return new Page(offset, Math.min(offset + size, total));
     }
 
     private static String encodeCursor(int position) {
