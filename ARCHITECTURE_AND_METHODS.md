@@ -13,6 +13,9 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 4. **Filtering, sorting & pagination**: `BookFilter` input and `BookSort` enum arguments, offset paging, and a `bookCount` total.
 5. **Typed errors**: A `DataFetcherExceptionResolverAdapter` mapping domain exceptions to NOT_FOUND / BAD_REQUEST classifications.
 6. **Subscriptions**: A `bookAdded` stream pushed to clients over WebSocket.
+7. **Interfaces, unions & custom scalars**: A `Publication` interface implemented by `Book` and `Magazine`, a `SearchResult` union, and hand-written `DateTime` and `URL` scalars.
+8. **Cursor connections**: Relay-style pagination with `edges`, opaque cursors, and `pageInfo`.
+9. **Hardening & observability**: Query depth, complexity, and length limits plus request logging and Micrometer metrics.
 
 ```
  [GraphQL Client / GraphiQL IDE]
@@ -40,12 +43,24 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`int bookCount(BookFilter filter)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `bookCount(filter: BookFilter): Int!` for pagination totals.
+- **`BookConnection bookConnection(Integer first, String after, BookFilter filter, BookSort sort)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Resolves `bookConnection(first: Int, after: String, ...): BookConnection!`, delegating to `catalogService.bookConnection(...)` for Relay-style cursor paging.
 - **`Optional<Book> bookById(@Argument String id)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `bookById(id: ID!): Book` by querying the catalog for the specified ID.
 - **`List<Author> authors()`** / **`Optional<Author> authorById(@Argument String id)`**:
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves author queries.
+- **`List<Publication> publications()`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Resolves `publications: [Publication!]!`. The returned list mixes `Book` and `Magazine`; graphql-java resolves the concrete type from the runtime class simple name, so clients use inline fragments.
+- **`Optional<Magazine> magazineById(@Argument String id)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Resolves `magazineById(id: ID!): Magazine`, including the `DateTime` and `URL` custom scalar fields.
+- **`List<Object> search(@Argument String text)`**:
+  - *Annotation*: `@QueryMapping`.
+  - *Operation*: Resolves `search(text: String!): [SearchResult!]!`, returning books, magazines, and authors whose title or name contains the text.
 - **`Book addBook(@Argument BookInput input)`**:
   - *Annotation*: `@MutationMapping`.
   - *Operation*: Validates and saves a new book, then publishes a `bookAdded` event.
@@ -77,6 +92,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Operation*: Applies the filter, then a deterministic sort (default `TITLE_ASC`, always with an ID tiebreaker), then `skip(offset)` and `limit(limit)`. Sorting before paging keeps results stable despite the unordered backing map.
 - **`int countBooks(BookFilter filter)`**:
   - *Operation*: Counts the books matching a filter, sharing the same filter predicate as `findBooks`.
+- **`BookConnection bookConnection(Integer first, String after, BookFilter filter, BookSort sort)`**:
+  - *Operation*: Reuses the same filter/sort pipeline, then slices a page. Cursors are Base64 of `offset:<n>` where `n` is the 1-based edge position, so `after` resumes at the following offset; an unparseable cursor falls back to the start. `pageInfo` reports `hasNextPage`/`hasPreviousPage` plus the start and end cursors.
 - **`Map<Book, Author> getAuthorsForBooks(List<Book> books)`**:
   - *Inputs*: `List<Book>` requested in the current query.
   - *Operation*: Collects unique author IDs from the books, executes a single bulk author lookup, and maps each `Book` key to its corresponding `Author` value.
@@ -90,6 +107,10 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Operation*: Updates the stock level for a book, throwing `BookNotFoundException` when the ID is unknown.
 - **`boolean deleteBook(String id)`**:
   - *Operation*: Removes a book, throwing `BookNotFoundException` when the ID is unknown.
+- **`Optional<Magazine> getMagazineById(String id)`** / **`List<Publication> getPublications()`**:
+  - *Operation*: Magazines live in their own map; `getPublications()` returns books and magazines together as `Publication` values, which backs the GraphQL interface.
+- **`List<Object> search(String text)`**:
+  - *Operation*: Case-insensitive match across book titles, magazine titles, and author names; the heterogeneous result list backs the `SearchResult` union.
 - **`validateBook(...)`**:
   - *Operation*: Shared guard raising `InvalidBookInputException` (blank title, non-positive pages, negative price/stock) or `AuthorNotFoundException` (unknown author ID).
 
@@ -104,3 +125,15 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 #### `BookEventPublisher`
 - *Annotation*: `@Component`.
 - *Operation*: Holds a `Sinks.Many<Book>` multicast sink. `publish(Book)` feeds it from the create path; `stream()` exposes it as a `Flux<Book>` that the `bookAdded` subscription forwards to WebSocket clients.
+
+#### `GraphQlScalarConfig`
+- *Annotation*: `@Configuration` implementing `RuntimeWiringConfigurer`.
+- *Operation*: Registers the hand-written `DateTime` (an ISO-8601 `Instant`) and `URL` (a `java.net.URI`) scalars, each with a `Coercing` that serializes to a string and rejects invalid input with a coercion exception.
+
+#### `GraphQlLimitsConfiguration` / `MaxQueryLengthInstrumentation`
+- *Annotation*: `@Configuration` exposing `Instrumentation` beans; Spring Boot collects them onto the `GraphQlSource`.
+- *Operation*: Enforces `MaxQueryDepthInstrumentation`, `MaxQueryComplexityInstrumentation`, and a custom raw-length check. Limits come from `GraphQlLimitsProperties` (`graphql.limits` in `application.yml`).
+
+#### `GraphQlRequestInterceptor`
+- *Annotation*: `@Component` implementing `WebGraphQlInterceptor`.
+- *Operation*: Times every GraphQL request, logs the operation with its duration and outcome, and records a Micrometer timer named `graphql.request` tagged by `operation` and `outcome`.

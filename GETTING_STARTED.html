@@ -163,6 +163,9 @@
       <li><a href="#reverse">Reverse batching: Author.books</a></li>
       <li><a href="#errors">Typed GraphQL errors</a></li>
       <li><a href="#subscriptions">Real-time subscriptions</a></li>
+      <li><a href="#modeling">Interfaces, unions, and custom scalars</a></li>
+      <li><a href="#connections">Cursor connections</a></li>
+      <li><a href="#hardening">Hardening and observability</a></li>
       <li><a href="#exercises">Hands-on exercises</a></li>
       <li><a href="#verify">Verifying it works</a></li>
       <li><a href="#logging">Logging and observability</a></li>
@@ -183,6 +186,9 @@
       <li><strong>Query power</strong> — filtering, sorting, and offset pagination driven by input objects and enums.</li>
       <li><strong>Typed errors</strong> — domain exceptions mapped to NOT_FOUND / BAD_REQUEST classifications.</li>
       <li><strong>Real-time updates</strong> — a <code>bookAdded</code> subscription streamed over WebSocket.</li>
+      <li><strong>Interfaces, unions, and custom scalars</strong> — a <code>Publication</code> interface, a <code>SearchResult</code> union, and hand-written <code>DateTime</code>/<code>URL</code> scalars.</li>
+      <li><strong>Cursor connections</strong> — Relay-style pagination with edges, opaque cursors, and <code>pageInfo</code>.</li>
+      <li><strong>Hardening and observability</strong> — query depth, complexity, and length limits plus request metrics.</li>
     </ul>
     <div class="callout">
       <p class="label">Mental model</p>
@@ -718,8 +724,160 @@ public Flux&lt;Book&gt; bookAdded() { return publisher.stream(); }</code></pre>
 }</code></pre>
   </section>
 
+  <section id="modeling">
+    <h2>14. Interfaces, unions, and custom scalars</h2>
+    <p>Not everything in the catalog is a book. The schema now models a shared <strong>interface</strong> and a <strong>union</strong>, and introduces two hand-written <strong>custom scalars</strong> instead of pulling in a scalar library.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Type hierarchy</strong> — <code>Book</code> and <code>Magazine</code> both implement <code>Publication</code>.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+classDiagram
+  class Publication {
+    &lt;&lt;interface&gt;&gt;
+    +String id
+    +String title
+  }
+  class Book {
+    +String id
+    +String title
+    +Int pages
+    +Float price
+    +Int stock
+    +Author author
+  }
+  class Magazine {
+    +String id
+    +String title
+    +Int issueNumber
+    +String publisher
+    +DateTime publishedOn
+    +URL website
+  }
+  Publication &lt;|.. Book
+  Publication &lt;|.. Magazine
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>An interface exposes shared fields directly; concrete fields are selected with <strong>inline fragments</strong>:</p>
+    <pre><code>query {
+  publications {
+    id
+    title
+    ... on Magazine { issueNumber publishedOn website }
+    ... on Book { pages }
+  }
+}</code></pre>
+
+    <p>A union has no shared fields at all, so every selection goes through a fragment. That is how <code>search</code> returns books, magazines, and authors together:</p>
+    <pre><code>query {
+  search(text: "java") {
+    __typename
+    ... on Book { title }
+    ... on Magazine { title issueNumber }
+    ... on Author { name }
+  }
+}</code></pre>
+
+    <p>Custom scalars define their own coercion. <code>DateTime</code> maps to an ISO-8601 <code>Instant</code> and <code>URL</code> to a <code>java.net.URI</code>, both registered through a <code>RuntimeWiringConfigurer</code>:</p>
+    <pre><code>@Configuration
+public class GraphQlScalarConfig implements RuntimeWiringConfigurer {
+
+    @Override
+    public void configure(RuntimeWiring.Builder builder) {
+        builder.scalar(DATE_TIME).scalar(URL);
+    }
+}</code></pre>
+
+    <div class="callout">
+      <p class="label">Type resolution</p>
+      <p>graphql-java resolves the concrete type from the runtime class simple name — <code>Book</code>, <code>Magazine</code>, <code>Author</code> — so no custom <code>TypeResolver</code> is needed.</p>
+    </div>
+  </section>
+
+  <section id="connections">
+    <h2>15. Cursor connections</h2>
+    <p>The offset-based <code>books</code> query still works. Alongside it, <code>bookConnection</code> offers Relay-style <strong>cursor</strong> pagination: a page of edges, each with an opaque cursor, plus page information.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Cursor paging</strong> — each response carries an <code>endCursor</code> that the next request passes back as <code>after</code>.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+flowchart LR
+  All["filtered and sorted books"] --> Slice["slice at after, take first"]
+  Slice --> Edges["edges: node plus base64 cursor"]
+  Slice --> Info["pageInfo: hasNextPage, endCursor"]
+  Info --> NextReq["next request: after = endCursor"]
+  NextReq --> Slice
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <pre><code>query {
+  bookConnection(first: 2, sort: TITLE_ASC) {
+    edges { cursor node { title } }
+    pageInfo { hasNextPage endCursor }
+    totalCount
+  }
+}
+
+# then resume from the previous page
+query ($after: String!) {
+  bookConnection(first: 2, after: $after) { edges { node { title } } }
+}</code></pre>
+
+    <div class="callout">
+      <p class="label">Opaque cursors</p>
+      <p>A cursor here is Base64 of <code>offset:&lt;n&gt;</code>, where <code>n</code> is the 1-based edge position. Treat it as opaque — it is only meaningful to the server.</p>
+    </div>
+  </section>
+
+  <section id="hardening">
+    <h2>16. Hardening and observability</h2>
+    <p>Expensive queries are rejected before they run, and every request is measured.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Request pipeline</strong> — the interceptor observes; the instrumentation guards.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+flowchart TB
+  Req["POST /graphql"] --> Int["GraphQlRequestInterceptor: log and time"]
+  Int --> Limits["Instrumentation: max length, depth, complexity"]
+  Limits -->|within limits| Exec["Execute operation"]
+  Limits -->|exceeded| Abort["AbortExecutionException becomes a GraphQL error"]
+  Exec --> Res["Response"]
+  Abort --> Res
+  Res --> Metrics["Micrometer timer graphql.request"]
+  Res --> Client["Client"]
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>The limits are graphql-java instrumentations collected as beans, configured under <code>graphql.limits</code>:</p>
+    <pre><code>graphql:
+  limits:
+    max-depth: 10
+    max-complexity: 200
+    max-query-length: 10000</code></pre>
+
+    <pre><code>@Bean
+public Instrumentation maxQueryDepthInstrumentation(GraphQlLimitsProperties properties) {
+    return new MaxQueryDepthInstrumentation(properties.getMaxDepth());
+}</code></pre>
+
+    <p>Because every request passes through the interceptor, a Micrometer timer is available from the actuator:</p>
+    <pre><code>curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
+  </section>
+
   <section id="exercises">
-    <h2>14. Hands-on exercises</h2>
+    <h2>17. Hands-on exercises</h2>
     <p>Try these in GraphiQL (<a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>) — it gives you autocomplete and error highlighting.</p>
     <ol>
       <li><strong>Field selection.</strong> Query only <code>books { title }</code>, then only <code>books { title price }</code>. Notice the response changes shape with the request. That is GraphQL's core promise over REST.</li>
@@ -732,12 +890,16 @@ public Flux&lt;Book&gt; bookAdded() { return publisher.stream(); }</code></pre>
       <li><strong>Both batch directions.</strong> Query <code>books { author { name } }</code>, then <code>authors { books { title } }</code>, and watch for one <code>GRAPHQL-BATCH-MAPPING</code> line per request.</li>
       <li><strong>Trigger typed errors.</strong> Run <code>updateBook(id: "book-999", input: {stock: 1})</code> and inspect <code>extensions.classification</code> (NOT_FOUND). Then send <code>input: {pages: 0}</code> against a real book and expect BAD_REQUEST.</li>
       <li><strong>Subscribe to changes.</strong> In GraphiQL run <code>subscription { bookAdded { id title } }</code>, then run <code>addBook</code> from a second tab and watch the event arrive.</li>
+      <li><strong>Query an interface.</strong> Run <code>publications { id title ... on Magazine { issueNumber } }</code> and confirm books have no <code>issueNumber</code> while magazines do.</li>
+      <li><strong>Query a union.</strong> Run <code>search(text: "java") { __typename ... on Book { title } ... on Magazine { title } }</code> and inspect the <code>__typename</code> values.</li>
+      <li><strong>Walk a cursor page.</strong> Request <code>bookConnection(first: 2)</code>, copy <code>pageInfo.endCursor</code>, and pass it back as <code>after</code>.</li>
+      <li><strong>Hit a limit.</strong> Send an over-deep query and read the error the instrumentation returns.</li>
       <li><strong>Extend the schema.</strong> Add a new field of your own — edit <code>schema.graphqls</code>, add the resolver, restart, and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
     </ol>
   </section>
 
   <section id="verify">
-    <h2>15. Verifying it works</h2>
+    <h2>18. Verifying it works</h2>
     <p>After starting the app, verify in layers — cheapest first:</p>
     <table>
       <thead><tr><th>Check</th><th>Command / action</th><th>Expected</th></tr></thead>
@@ -752,7 +914,12 @@ public Flux&lt;Book&gt; bookAdded() { return publisher.stream(); }</code></pre>
         <tr><td>Reverse batching works</td><td><code>authors { books { title } }</code>, check the log</td><td>Every author has a non-null <code>books</code> list and one batch line appears</td></tr>
         <tr><td>Errors are typed</td><td><code>deleteBook(id: "book-999")</code></td><td><code>extensions.classification = "NOT_FOUND"</code></td></tr>
         <tr><td>Subscriptions stream</td><td>GraphiQL <code>subscription { bookAdded { id title } }</code>, then <code>addBook</code></td><td>The new book is pushed to the subscriber</td></tr>
-        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 35, Failures: 0, Errors: 0</td></tr>
+        <tr><td>Interface and union resolve</td><td><code>publications { __typename ... on Magazine { issueNumber } }</code></td><td>Both <code>Book</code> and <code>Magazine</code> appear, each with its own fields</td></tr>
+        <tr><td>Custom scalars work</td><td><code>magazineById(id: "magazine-1") { publishedOn website }</code></td><td>An ISO-8601 date and a URL string</td></tr>
+        <tr><td>Cursor paging works</td><td><code>bookConnection(first: 2) { edges { cursor } pageInfo { endCursor } }</code>, then reuse the cursor</td><td>The next page resumes after the previous one</td></tr>
+        <tr><td>Limits are enforced</td><td>Send an over-deep or oversized query</td><td>An <code>errors</code> array instead of execution</td></tr>
+        <tr><td>Metrics are recorded</td><td><code>curl -s localhost:8086/actuator/metrics/graphql.request</code></td><td>A <code>graphql.request</code> timer is present</td></tr>
+        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 48, Failures: 0, Errors: 0</td></tr>
       </tbody>
     </table>
     <div class="callout">
@@ -762,7 +929,7 @@ public Flux&lt;Book&gt; bookAdded() { return publisher.stream(); }</code></pre>
   </section>
 
   <section id="logging">
-    <h2>16. Logging and observability</h2>
+    <h2>19. Logging and observability</h2>
     <p>The app logs through <strong>SLF4J + Logback</strong> (Logback comes in with <code>spring-boot-starter-web</code>). Configuration lives in <code>application.yml</code>:</p>
     <pre><code>logging:
   level:
@@ -783,7 +950,7 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="troubleshoot">
-    <h2>17. Troubleshooting</h2>
+    <h2>20. Troubleshooting</h2>
     <table>
       <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
       <tbody>
@@ -797,18 +964,18 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="next">
-    <h2>18. Where to go next</h2>
+    <h2>21. Where to go next</h2>
     <ul>
       <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is the single source of truth for the entire API surface.</li>
       <li><strong>Follow one request end to end.</strong> Start in <code>BookGraphQLController</code>, then read the matching method in <code>CatalogDataService</code>.</li>
       <li><strong>Go deeper on methods.</strong> <code>ARCHITECTURE_AND_METHODS.md</code> explains each method in more detail.</li>
       <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>saveBook</code> derives IDs from map size (fine for a demo, collision-prone in general), and the multicast event sink drops events emitted while nobody is subscribed.</li>
-      <li><strong>Next real-world steps.</strong> Persist to a database, move to Relay cursor pagination, add authentication and field-level authorization, and add query depth/complexity limits.</li>
+      <li><strong>Next real-world steps.</strong> Persist to a database, add authentication and field-level authorization, add persisted queries (APQ), and try <code>@defer</code>/<code>@stream</code> incremental delivery.</li>
     </ul>
   </section>
 
   <section id="glossary">
-    <h2>19. Glossary</h2>
+    <h2>22. Glossary</h2>
     <table>
       <thead><tr><th>Term</th><th>Definition</th></tr></thead>
       <tbody>
@@ -827,6 +994,12 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
         <tr><td><strong>Error classification</strong></td><td>The <code>extensions.classification</code> on a GraphQL error, e.g. NOT_FOUND or BAD_REQUEST, giving clients a machine-readable failure kind.</td></tr>
         <tr><td><strong>Subscription</strong></td><td>A long-lived GraphQL operation that streams events from server to client, typically over WebSocket.</td></tr>
         <tr><td><strong>Reverse batch mapping</strong></td><td>Batching a one-to-many relationship in the opposite direction, e.g. resolving many books per author in a single call.</td></tr>
+        <tr><td><strong>Interface</strong></td><td>A schema type whose fields are shared by implementing types, selected with inline fragments, e.g. <code>Publication</code>.</td></tr>
+        <tr><td><strong>Union</strong></td><td>A schema type that is one of several object types and shares no fields, e.g. <code>SearchResult</code>.</td></tr>
+        <tr><td><strong>Inline fragment</strong></td><td>A <code>... on Type { }</code> selection that applies only when the runtime type matches.</td></tr>
+        <tr><td><strong>Custom scalar</strong></td><td>A scalar with application-defined coercion, e.g. <code>DateTime</code> or <code>URL</code>.</td></tr>
+        <tr><td><strong>Connection / cursor</strong></td><td>Relay-style pagination in which each edge carries an opaque cursor used to resume.</td></tr>
+        <tr><td><strong>Instrumentation</strong></td><td>A graphql-java hook that can observe or alter execution; used here for the depth, complexity, and length limits.</td></tr>
       </tbody>
     </table>
   </section>
