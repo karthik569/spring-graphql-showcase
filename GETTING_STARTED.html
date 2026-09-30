@@ -168,6 +168,7 @@
       <li><a href="#hardening">Hardening and observability</a></li>
       <li><a href="#auth">Authorization with JWT bearer tokens</a></li>
       <li><a href="#apq">Persisted queries</a></li>
+      <li><a href="#persistence">Persistence</a></li>
       <li><a href="#exercises">Hands-on exercises</a></li>
       <li><a href="#verify">Verifying it works</a></li>
       <li><a href="#logging">Logging and observability</a></li>
@@ -194,6 +195,8 @@
       <li><strong>Authorization</strong> — JWT bearer tokens with operation- and field-level rules.</li>
       <li><strong>Errors as data</strong> — an <code>AddBookResult</code> union returning <code>Book | ValidationFailed</code>.</li>
       <li><strong>Persisted queries</strong> — Apollo-style APQ, so clients can send a hash instead of a document.</li>
+      <li><strong>Persistence</strong> — H2 with Flyway migrations behind JDBC repositories, so batching and paging are real SQL.</li>
+      <li><strong>Schema directives</strong> — an <code>@auth(requires: Role)</code> directive enforced by <code>SchemaDirectiveWiring</code>.</li>
     </ul>
     <div class="callout">
       <p class="label">Mental model</p>
@@ -963,6 +966,12 @@ mutation {
 
     <p>The <code>bookAdded</code> subscription also requires a token. WebSocket messages run outside the servlet security context, so a dedicated interceptor validates the bearer token from the connection and publishes the authentication into the GraphQL context, where the resolver requires it. Browsers cannot set WebSocket handshake headers, so real clients send the token in the <code>connection_init</code> payload.</p>
 
+    <p>One field is guarded the other way round. <code>Book.costPrice</code> declares its policy in the schema, and a <code>SchemaDirectiveWiring</code> wraps that field's data fetcher with the role check — the rule sits next to the field it protects instead of in an annotation on a method:</p>
+    <pre><code>type Book {
+    ...
+    costPrice: Float! @auth(requires: ADMIN)
+}</code></pre>
+
     <h3>Nullability: null versus error propagation</h3>
     <p>Two outcomes look similar but behave differently:</p>
     <ul>
@@ -1015,8 +1024,48 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
     </div>
   </section>
 
+  <section id="persistence">
+    <h2>19. Persistence</h2>
+    <p>The catalog is no longer a set of maps. Flyway creates and seeds an H2 database, and three repositories read it through <code>NamedParameterJdbcTemplate</code> — the service API and every resolver are unchanged.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>From query to SQL</strong> — resolvers talk to the service, which delegates to repositories; batching and paging become single statements.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+flowchart LR
+  Client["GraphQL client"] --> Resolvers["Resolvers"]
+  Resolvers --> Service["CatalogDataService"]
+  Service --> Repos["Book, Author and Magazine repositories"]
+  Repos -->|"one IN (…) statement per batch"| Db[("H2, migrated by Flyway")]
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <pre><code>src/main/resources/db/migration/
+  V1__catalog_schema.sql   -- authors, books, magazines plus sequences
+  V2__seed_catalog.sql     -- the same seed data the showcase expects</code></pre>
+
+    <p>Two consequences are worth seeing. Filtering, sorting, and paging for books are now real SQL:</p>
+    <pre><code>select id, title, pages, price, stock, author_id from books
+ where lower(title) like ?
+ order by lower(title) asc, id asc
+ limit ? offset ?</code></pre>
+
+    <p>And each batch loader is a single statement for a whole list, which is the N+1 fix made concrete:</p>
+    <pre><code>select id, name, country from authors where id in (?, ?, ?, ?)</code></pre>
+
+    <div class="callout">
+      <p class="label">Swapping the database</p>
+      <p>Only <code>spring.datasource.*</code> changes: point the URL and driver at Postgres and the same migrations apply. Ids stay <code>book-&lt;n&gt;</code> because they come from a sequence, so the public API shape does not change.</p>
+    </div>
+
+    <p>Pagination now has two forms on an author: <code>books</code> is batch-loaded but unpaginated, while <code>bookConnection(first, after)</code> takes arguments and therefore cannot be batched — a deliberate trade-off shown by the nested example in the operation reference.</p>
+  </section>
+
   <section id="exercises">
-    <h2>19. Hands-on exercises</h2>
+    <h2>20. Hands-on exercises</h2>
     <p>Try these in GraphiQL (<a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>) — it gives you autocomplete and error highlighting.</p>
     <ol>
       <li><strong>Field selection.</strong> Query only <code>books { title }</code>, then only <code>books { title price }</code>. Notice the response changes shape with the request. That is GraphQL's core promise over REST.</li>
@@ -1038,12 +1087,14 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
       <li><strong>Watch a field denial.</strong> Query <code>books { costPrice }</code> anonymously and with the admin token, and compare the shape of <code>data</code>.</li>
       <li><strong>Compare error styles.</strong> Call <code>addBook</code> and <code>addBookResult</code> with the same bad input and compare where the failure appears.</li>
       <li><strong>Persist a query.</strong> Register <code>query { bookCount }</code> with its SHA-256 hash, then call it with the hash alone; then try a random hash and read the error.</li>
+      <li><strong>Watch the SQL.</strong> Create a book, then watch the JDBC DEBUG log: the insert, and a single <code>in (…)</code> statement for the author batch.</li>
+      <li><strong>Page an author's books.</strong> Query <code>authorById(id: "author-1") { bookConnection(first: 1) { edges { cursor } } }</code> and resume with the cursor.</li>
       <li><strong>Extend the schema.</strong> Add a new field of your own — edit <code>schema.graphqls</code>, add the resolver, restart, and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
     </ol>
   </section>
 
   <section id="verify">
-    <h2>20. Verifying it works</h2>
+    <h2>21. Verifying it works</h2>
     <p>After starting the app, verify in layers — cheapest first:</p>
     <table>
       <thead><tr><th>Check</th><th>Command / action</th><th>Expected</th></tr></thead>
@@ -1070,7 +1121,11 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
         <tr><td>Errors as data</td><td><code>addBookResult</code> with <code>pages: 0</code></td><td><code>... on ValidationFailed { field }</code> is <code>pages</code>, with no <code>errors</code> entry</td></tr>
         <tr><td>Persisted queries</td><td>Register <code>query { bookCount }</code> with its hash, then send the hash alone</td><td>The same result, then <code>PersistedQueryNotFound</code> for an unknown hash</td></tr>
         <tr><td>Subscription auth</td><td>Connect to <code>bookAdded</code> without a token, then with one</td><td>UNAUTHORIZED, then events arrive</td></tr>
-        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 71, Failures: 0, Errors: 0</td></tr>
+        <tr><td>Persistence</td><td>Create a book, restart nothing, and query it back</td><td>The row is read from H2, seeded by Flyway</td></tr>
+        <tr><td>One query per batch</td><td>Query <code>books { author { name } }</code> with JDBC logging at DEBUG</td><td>A single <code>select … where id in (…)</code> statement</td></tr>
+        <tr><td>Schema directive</td><td><code>books { costPrice }</code> anonymously then with an admin token</td><td>Error, then numbers — enforced by <code>@auth</code>, not an annotation</td></tr>
+        <tr><td>Nested pagination</td><td><code>authorById(id: "author-1") { bookConnection(first: 1) { pageInfo { endCursor } } }</code></td><td>One edge with a cursor to resume from</td></tr>
+        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 82, Failures: 0, Errors: 0</td></tr>
       </tbody>
     </table>
     <div class="callout">
@@ -1080,7 +1135,7 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
   </section>
 
   <section id="logging">
-    <h2>21. Logging and observability</h2>
+    <h2>22. Logging and observability</h2>
     <p>The app logs through <strong>SLF4J + Logback</strong> (Logback comes in with <code>spring-boot-starter-web</code>). Configuration lives in <code>application.yml</code>:</p>
     <pre><code>logging:
   level:
@@ -1101,7 +1156,7 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="troubleshoot">
-    <h2>22. Troubleshooting</h2>
+    <h2>23. Troubleshooting</h2>
     <table>
       <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
       <tbody>
@@ -1115,18 +1170,18 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="next">
-    <h2>23. Where to go next</h2>
+    <h2>24. Where to go next</h2>
     <ul>
       <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is the single source of truth for the entire API surface.</li>
       <li><strong>Follow one request end to end.</strong> Start in <code>BookGraphQLController</code>, then read the matching method in <code>CatalogDataService</code>.</li>
       <li><strong>Go deeper on methods.</strong> <code>ARCHITECTURE_AND_METHODS.md</code> explains each method in more detail.</li>
-      <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>saveBook</code> derives IDs from map size (fine for a demo, collision-prone in general), and the multicast event sink drops events emitted while nobody is subscribed.</li>
-      <li><strong>Next real-world steps.</strong> Persist to a database, replace the in-memory user store with a real identity provider, and move the persisted-query registry to a shared store. <code>@defer</code>/<code>@stream</code> and GraphQL over HTTP GET are not available on this stack (Spring for GraphQL 1.3 has no incremental-delivery transport and its HTTP transport is POST-only).</li>
+      <li><strong>Know the limitations.</strong> This is a teaching app: the H2 database is in-memory (data resets on restart), ids come from a sequence, and the multicast event sink drops events emitted while nobody is subscribed.</li>
+      <li><strong>Next real-world steps.</strong> Point <code>spring.datasource.*</code> at Postgres, replace the in-memory user store with a real identity provider, move the persisted-query registry to a shared store, and add a CI workflow. <code>@defer</code>/<code>@stream</code> and GraphQL over HTTP GET are not available on this stack (Spring for GraphQL 1.3 has no incremental-delivery transport and its HTTP transport is POST-only).</li>
     </ul>
   </section>
 
   <section id="glossary">
-    <h2>24. Glossary</h2>
+    <h2>25. Glossary</h2>
     <table>
       <thead><tr><th>Term</th><th>Definition</th></tr></thead>
       <tbody>
@@ -1158,6 +1213,9 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
         <tr><td><strong>Error as data</strong></td><td>Returning failures as typed members of a result union instead of a GraphQL <code>errors</code> entry, e.g. <code>AddBookResult</code>.</td></tr>
         <tr><td><strong>Persisted query (APQ)</strong></td><td>Sending a query's SHA-256 hash instead of its text, with the document registered once.</td></tr>
         <tr><td><strong>WebSocket interceptor</strong></td><td>A <code>WebSocketGraphQlInterceptor</code> that authenticates a subscription connection and publishes the authentication into the GraphQL context.</td></tr>
+        <tr><td><strong>Repository</strong></td><td>A class that maps rows to domain objects and hides the SQL, e.g. <code>BookRepository</code> over <code>NamedParameterJdbcTemplate</code>.</td></tr>
+        <tr><td><strong>Migration</strong></td><td>A versioned SQL script (Flyway) that creates or changes the schema, applied automatically at startup.</td></tr>
+        <tr><td><strong>Schema directive</strong></td><td>A schema-declared rule like <code>@auth(requires: ADMIN)</code>, implemented once with <code>SchemaDirectiveWiring</code> and applied per field.</td></tr>
       </tbody>
     </table>
   </section>

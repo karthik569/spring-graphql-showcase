@@ -1,6 +1,6 @@
 # Spring for GraphQL Schema-First Showcase 🌌
 
-A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed errors and error-as-data result unions, real-time updates over WebSocket, query limits with request metrics, automatic persisted queries, and JWT bearer authorization with operation- and field-level rules.
+A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, `@SubscriptionMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem. It also demonstrates filtering, sorting and pagination, interfaces and unions, custom scalars, Relay-style cursor connections, typed errors and error-as-data result unions, real-time updates over WebSocket, query limits with request metrics, automatic persisted queries, and JWT bearer authorization with operation- and field-level rules. The catalog is persisted in H2 through Flyway migrations and JDBC repositories, so the batching lessons run against real SQL.
 
 > 📖 **New to Spring GraphQL or this repo?** Start with the [Getting Started guide](GETTING_STARTED.html).
 
@@ -34,8 +34,11 @@ A production-grade GraphQL server implementing **Schema-First Design**, `@QueryM
 - **`Object addBookResult(BookInput input)`**: `@MutationMapping`; the error-as-data counterpart of `addBook`, returning `Book | ValidationFailed` as data rather than a GraphQL error.
 - **`WebSocketAuthInterceptor`**: validates the bearer token on the WebSocket handshake and publishes the authentication into the GraphQL context, which `bookAdded` requires.
 - **`PersistedQueryInterceptor` / `PersistedQueryStore`**: Apollo-style APQ — register a document under its hash, then resolve it from the hash alone.
+- **`BookConnection authorBookConnection(Author, Integer first, String after)`**: `@SchemaMapping`; per-author cursor pagination. It takes arguments, so it cannot be batch-resolved — `Author.books` remains the batched alternative.
+- **`AuthDirectiveWiring`**: implements the schema's `@auth(requires: Role)` directive by wrapping a field's data fetcher with a role check; `Book.costPrice` is guarded this way instead of with an annotation.
+- **`CatalogDataService` + `BookRepository` / `AuthorRepository` / `MagazineRepository`**: persistence via `NamedParameterJdbcTemplate`. Filtering, sorting, and paging for books run in SQL, and both batch loaders issue a single `IN (…)` query.
 
-Authorization rules: reads are public; `addBook`, `addBookResult`, `updateBook`, and `updateStock` require an authenticated user; `deleteBook` requires the ADMIN role; the `bookAdded` subscription requires an authenticated WebSocket connection.
+Authorization rules: reads are public; `addBook`, `addBookResult`, `updateBook`, and `updateStock` require an authenticated user; `deleteBook` (annotation) and `Book.costPrice` (schema directive) require the ADMIN role; the `bookAdded` subscription requires an authenticated WebSocket connection.
 
 > **Not supported on this stack**: `@defer`/`@stream` (Spring for GraphQL 1.3 has no incremental-delivery transport) and GraphQL over HTTP GET (the transport is POST-only).
 
@@ -53,6 +56,8 @@ mvn clean test
 ```bash
 mvn spring-boot:run
 ```
+
+> **Data**: the catalog lives in H2, created by the Flyway migrations in `src/main/resources/db/migration` (schema + seed). Change `spring.datasource.url` and the driver to point at Postgres and the same migrations apply.
 
 ---
 

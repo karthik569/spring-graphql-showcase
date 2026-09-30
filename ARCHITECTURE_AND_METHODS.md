@@ -20,6 +20,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 11. **More connections & scalar input**: Cursor connections for authors and publications, and `DateTime` used as a query argument.
 12. **Error-as-data**: An `addBookResult` mutation returning `Book | ValidationFailed`, so failures arrive as data instead of GraphQL errors.
 13. **Persisted queries & WebSocket auth**: Apollo-style automatic persisted queries, and bearer-token authentication for subscriptions.
+14. **Persistence**: H2 + Flyway migrations behind JDBC repositories; filtering, sorting, and paging for books run in SQL, and the batch loaders issue a single `IN (…)` query.
+15. **Schema directives**: A custom `@auth(requires: Role)` directive implemented with `SchemaDirectiveWiring`.
 
 ```
  [GraphQL Client / GraphiQL IDE]
@@ -75,8 +77,8 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Annotation*: `@QueryMapping`.
   - *Operation*: Resolves `search(text: String!): [SearchResult!]!`, returning books, magazines, and authors whose title or name contains the text.
 - **`double costPrice(Book book)`**:
-  - *Annotation*: `@SchemaMapping(typeName = "Book", field = "costPrice")` + `@PreAuthorize("hasRole('ADMIN')")`.
-  - *Operation*: Field-level authorization. The derived internal price is only visible to administrators; because the field is non-null, a denied read also demonstrates non-null error propagation.
+  - *Annotation*: `@SchemaMapping(typeName = "Book", field = "costPrice")`, guarded by the schema's `@auth(requires: ADMIN)` directive.
+  - *Operation*: Field-level authorization declared in the SDL and enforced by `AuthDirectiveWiring`, which wraps this field's data fetcher with a role check. Because the field is non-null, a denied read also demonstrates non-null error propagation.
 - **`String email(Author author)`**:
   - *Annotation*: `@SchemaMapping(typeName = "Author", field = "email")` + `@PreAuthorize("isAuthenticated()")`.
   - *Operation*: Field-level authorization requiring any authenticated caller.
@@ -87,7 +89,7 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
   - *Annotation*: `@MutationMapping`.
   - *Operation*: The error-as-data counterpart of `addBook`. Returns the created `Book`, or a `ValidationFailed` when `InvalidBookInputException` (carrying the offending `field`) or `AuthorNotFoundException` is caught — so the client handles both union members and sees no `errors` entry.
 - **Authorization on writes**:
-  - `@PreAuthorize("isAuthenticated()")` on `addBook`, `addBookResult`, `updateBook`, and `updateStock`; `@PreAuthorize("hasRole('ADMIN')")` on `deleteBook` and `Book.costPrice`.
+  - `@PreAuthorize("isAuthenticated()")` on `addBook`, `addBookResult`, `updateBook`, and `updateStock`; `@PreAuthorize("hasRole('ADMIN')")` on `deleteBook`. `Book.costPrice` is guarded by the `@auth` schema directive instead, so exactly one mechanism applies per field.
 - **`Book updateBook(@Argument String id, @Argument BookUpdateInput input)`**:
   - *Annotation*: `@MutationMapping`.
   - *Operation*: Resolves `updateBook(id: ID!, input: BookUpdateInput!): Book!` as a partial patch — each nullable input field falls back to the existing value.
@@ -103,6 +105,9 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 - **`Map<Author, List<Book>> books(List<Author> authors)`**:
   - *Annotation*: `@BatchMapping(typeName = "Author", field = "books")`.
   - *Reverse N+1 Solution*: The mirror image. For `query { authors { books { title } } }` the engine collects every parent author and calls this method once with the whole list. Authors without books map to an empty list, so the non-null `[Book!]!` schema type is always satisfied.
+- **`BookConnection authorBookConnection(Author author, Integer first, String after)`**:
+  - *Annotation*: `@SchemaMapping(typeName = "Author", field = "bookConnection")`.
+  - *Operation*: Per-author cursor pagination. It takes arguments, so it cannot be batch-resolved — the contrast with the batched `books` field above is deliberate.
 - **`Flux<Book> bookAdded(GraphQLContext context)`**:
   - *Annotation*: `@SubscriptionMapping`.
   - *Operation*: Streams newly created books to subscribed clients over WebSocket, backed by `BookEventPublisher`. Requires an authenticated connection: the `WebSocketAuthInterceptor` publishes the authentication into the GraphQL context, and this method rejects the subscription when it is absent.
@@ -185,3 +190,16 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 #### `SubscriptionExceptionResolver`
 - *Annotation*: `@Bean` in `SecurityConfig`.
 - *Operation*: Subscription failures are resolved separately from data fetcher exceptions, so the `AccessDeniedException` → UNAUTHORIZED mapping is registered here as well; otherwise a denied subscription surfaces as an opaque INTERNAL_ERROR.
+
+---
+
+## 3. Persistence Layer
+
+`CatalogDataService` keeps its public API but now delegates to three repositories, so the controller and every resolver are unchanged while the storage became real.
+
+#### `BookRepository`, `AuthorRepository`, `MagazineRepository`
+- *Annotation*: `@Repository`, backed by `NamedParameterJdbcTemplate`.
+- *Operation*: Map rows onto the existing `Book` / `Author` / `Magazine` records. `BookRepository.findAll` assembles its `WHERE`, `ORDER BY`, `LIMIT`, and `OFFSET` from the `BookFilter` / `BookSort` arguments, and `AuthorRepository.findByIds` / `BookRepository.findByAuthorIds` are the single `IN (…)` statements that back the two batch loaders.
+
+#### `V1__catalog_schema.sql` / `V2__seed_catalog.sql`
+- *Operation*: Flyway creates the `authors`, `books`, and `magazines` tables plus `book_seq` / `magazine_seq` sequences, then seeds exactly the data the showcase expects. Ids are formatted as `book-<n>` from a sequence so the public API shape (and every doc example) is unchanged.
