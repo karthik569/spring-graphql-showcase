@@ -4,12 +4,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.graphql.tester.AutoConfigureHttpGraphQlTester;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.graphql.test.tester.HttpGraphQlTester;
+import org.springframework.graphql.test.tester.WebSocketGraphQlTester;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
+import reactor.core.Disposable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,6 +30,9 @@ class BookGraphQLIntegrationTest {
     @Autowired
     private WebTestClient webTestClient;
 
+    @LocalServerPort
+    private int port;
+
     record AuthorView(String id, String name, String country) {
     }
 
@@ -30,6 +40,15 @@ class BookGraphQLIntegrationTest {
     }
 
     record BookSummary(String id, String title, Integer stock) {
+    }
+
+    record BookTitle(String title) {
+    }
+
+    record AuthorWithBooks(String name, List<BookTitle> books) {
+    }
+
+    record SubscribedBook(String id, String title) {
     }
 
     @Test
@@ -71,6 +90,82 @@ class BookGraphQLIntegrationTest {
         assertThat(books).allSatisfy(book -> assertThat(book.author()).isNotNull());
         assertThat(books).extracting(book -> book.author().name())
                 .contains("Joshua Bloch", "Martin Fowler", "Robert C. Martin");
+    }
+
+    @Test
+    void booksCanBeFiltered() {
+        List<String> byTitle = titles("query { books(filter: {titleContains: \"Effective\"}) { title } }");
+        assertThat(byTitle).containsExactly("Effective Java");
+
+        List<String> byAuthor = titles("query { books(filter: {authorId: \"author-2\"}) { title } }");
+        assertThat(byAuthor).containsExactly("Refactoring");
+
+        List<String> byPrice = titles("query { books(filter: {minPrice: 44.0, maxPrice: 46.0}) { title } }");
+        assertThat(byPrice).containsExactly("Effective Java");
+    }
+
+    @Test
+    void booksCanBeSorted() {
+        List<String> ascending = titles("query { books(sort: TITLE_ASC) { title } }");
+        List<String> descending = titles("query { books(sort: TITLE_DESC) { title } }");
+
+        assertThat(ascending).isSortedAccordingTo(String.CASE_INSENSITIVE_ORDER);
+        assertThat(descending).isSortedAccordingTo(String.CASE_INSENSITIVE_ORDER.reversed());
+    }
+
+    @Test
+    void booksCanBePaged() {
+        List<String> all = titles("query { books(sort: TITLE_ASC) { title } }");
+        List<String> page = titles("query { books(sort: TITLE_ASC, limit: 2, offset: 1) { title } }");
+
+        assertThat(all).hasSizeGreaterThanOrEqualTo(3);
+        assertThat(page).isEqualTo(all.subList(1, 3));
+    }
+
+    @Test
+    void bookCountMatchesTheFilteredBooksQuery() {
+        Integer total = graphQlTester.document("query { bookCount }")
+                .execute()
+                .path("bookCount")
+                .entity(Integer.class)
+                .get();
+
+        assertThat(total).isEqualTo(titles("query { books { title } }").size());
+
+        Integer byAuthor = graphQlTester.document("query { bookCount(filter: {authorId: \"author-2\"}) }")
+                .execute()
+                .path("bookCount")
+                .entity(Integer.class)
+                .get();
+
+        assertThat(byAuthor).isEqualTo(1);
+    }
+
+    @Test
+    void authorBooksAreResolvedThroughReverseBatchMapping() {
+        List<AuthorWithBooks> authors = graphQlTester.document("""
+                        query {
+                          authors {
+                            name
+                            books { title }
+                          }
+                        }
+                        """)
+                .execute()
+                .path("authors")
+                .entityList(AuthorWithBooks.class)
+                .get();
+
+        assertThat(authors).extracting(AuthorWithBooks::name)
+                .contains("Joshua Bloch", "Martin Fowler", "Robert C. Martin");
+        assertThat(authors).allSatisfy(author -> assertThat(author.books()).isNotNull());
+
+        AuthorWithBooks bloch = authors.stream()
+                .filter(author -> author.name().equals("Joshua Bloch"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bloch.books()).extracting(BookTitle::title)
+                .contains("Effective Java", "Java Puzzlers");
     }
 
     @Test
@@ -158,28 +253,7 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void addBookMutationCreatesAQueryableBook() {
-        BookView created = graphQlTester.document("""
-                        mutation ($input: BookInput!) {
-                          addBook(input: $input) {
-                            id
-                            title
-                            pages
-                            price
-                            stock
-                            author { name }
-                          }
-                        }
-                        """)
-                .variable("input", Map.of(
-                        "title", "Cloud Native Java",
-                        "pages", 450,
-                        "price", 59.0,
-                        "stock", 12,
-                        "authorId", "author-1"))
-                .execute()
-                .path("addBook")
-                .entity(BookView.class)
-                .get();
+        BookView created = addBook("Cloud Native Java", 450, 59.0, 12, "author-1");
 
         assertThat(created.id()).startsWith("book-");
         assertThat(created.title()).isEqualTo("Cloud Native Java");
@@ -199,6 +273,54 @@ class BookGraphQLIntegrationTest {
                 .get();
 
         assertThat(fetched.title()).isEqualTo("Cloud Native Java");
+    }
+
+    @Test
+    void updateBookMutationPatchesOnlyProvidedFields() {
+        BookView created = addBook("Integration Update", 100, 10.0, 5, "author-1");
+
+        BookSummary updated = graphQlTester.document("""
+                        mutation ($id: ID!, $input: BookUpdateInput!) {
+                          updateBook(id: $id, input: $input) { id title stock }
+                        }
+                        """)
+                .variable("id", created.id())
+                .variable("input", Map.of("stock", 0))
+                .execute()
+                .path("updateBook")
+                .entity(BookSummary.class)
+                .get();
+
+        assertThat(updated.stock()).isZero();
+        assertThat(updated.title()).isEqualTo("Integration Update");
+
+        deleteBook(created.id());
+    }
+
+    @Test
+    void deleteBookMutationRemovesBookThenReportsNotFound() {
+        BookView created = addBook("Doomed", 100, 10.0, 1, "author-1");
+
+        assertThat(deleteBook(created.id())).isTrue();
+
+        graphQlTester.document("""
+                        query ($id: ID!) {
+                          bookById(id: $id) { id }
+                        }
+                        """)
+                .variable("id", created.id())
+                .execute()
+                .path("bookById")
+                .valueIsNull();
+
+        graphQlTester.document("mutation ($id: ID!) { deleteBook(id: $id) }")
+                .variable("id", created.id())
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getErrorType().toString()).isEqualTo("NOT_FOUND");
+                });
     }
 
     @Test
@@ -232,7 +354,7 @@ class BookGraphQLIntegrationTest {
     }
 
     @Test
-    void updateStockMutationOnUnknownBookReturnsGraphQLError() {
+    void updateStockMutationOnUnknownBookIsClassifiedNotFound() {
         graphQlTester.document("""
                         mutation ($id: ID!, $stock: Int!) {
                           updateStock(id: $id, stock: $stock) { id }
@@ -242,6 +364,94 @@ class BookGraphQLIntegrationTest {
                 .variable("stock", 1)
                 .execute()
                 .errors()
-                .satisfy(errors -> assertThat(errors).isNotEmpty());
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getErrorType().toString()).isEqualTo("NOT_FOUND");
+                });
+    }
+
+    @Test
+    void invalidBookInputIsClassifiedBadRequest() {
+        graphQlTester.document("""
+                        mutation {
+                          addBook(input: {title: "Bad Book", pages: 0, price: 1.0, stock: 1, authorId: "author-1"}) { id }
+                        }
+                        """)
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getErrorType().toString()).isEqualTo("BAD_REQUEST");
+                });
+    }
+
+    @Test
+    void bookAddedSubscriptionEmitsNewBooks() throws InterruptedException {
+        WebSocketGraphQlTester wsTester = WebSocketGraphQlTester
+                .builder("http://localhost:" + port + "/graphql", new ReactorNettyWebSocketClient())
+                .build();
+
+        BlockingQueue<SubscribedBook> received = new LinkedBlockingQueue<>();
+        Disposable subscription = wsTester.document("subscription { bookAdded { id title } }")
+                .executeSubscription()
+                .toFlux("bookAdded", SubscribedBook.class)
+                .subscribe(received::add);
+
+        try {
+            Thread.sleep(1000);
+            addBook("Reactive Integration", 120, 20.0, 3, "author-1");
+
+            SubscribedBook emitted = received.poll(15, TimeUnit.SECONDS);
+            assertThat(emitted).isNotNull();
+            assertThat(emitted.title()).isEqualTo("Reactive Integration");
+        } finally {
+            subscription.dispose();
+            wsTester.stop().block();
+        }
+    }
+
+    private List<String> titles(String document) {
+        return graphQlTester.document(document)
+                .execute()
+                .path("books")
+                .entityList(BookTitle.class)
+                .get()
+                .stream()
+                .map(BookTitle::title)
+                .toList();
+    }
+
+    private BookView addBook(String title, int pages, double price, int stock, String authorId) {
+        return graphQlTester.document("""
+                        mutation ($input: BookInput!) {
+                          addBook(input: $input) {
+                            id
+                            title
+                            pages
+                            price
+                            stock
+                            author { name }
+                          }
+                        }
+                        """)
+                .variable("input", Map.of(
+                        "title", title,
+                        "pages", pages,
+                        "price", price,
+                        "stock", stock,
+                        "authorId", authorId))
+                .execute()
+                .path("addBook")
+                .entity(BookView.class)
+                .get();
+    }
+
+    private boolean deleteBook(String id) {
+        return graphQlTester.document("mutation ($id: ID!) { deleteBook(id: $id) }")
+                .variable("id", id)
+                .execute()
+                .path("deleteBook")
+                .entity(Boolean.class)
+                .get();
     }
 }
