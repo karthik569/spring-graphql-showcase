@@ -27,3 +27,10 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
   file:
     name: logs/spring-graphql-showcase.log
+
+# Query-shape guards applied to every request (see GraphQlLimitsProperties)
+graphql:
+  limits:
+    max-depth: 10
+    max-complexity: 200
+    max-query-length: 10000
