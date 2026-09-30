@@ -35,6 +35,12 @@ public class PersistedQueryInterceptor implements WebGraphQlInterceptor {
     private static final String NOT_FOUND_CODE = "PERSISTED_QUERY_NOT_FOUND";
     private static final String MISMATCH_CODE = "PERSISTED_QUERY_HASH_MISMATCH";
 
+    /**
+     * Spring substitutes this sentinel as the document when a request carries only
+     * {@code extensions.persistedQuery}, so it must be treated as "no document".
+     */
+    private static final String PERSISTED_QUERY_MARKER = "PersistedQueryMarker";
+
     private final PersistedQueryStore store;
 
     public PersistedQueryInterceptor(PersistedQueryStore store) {
@@ -49,7 +55,7 @@ public class PersistedQueryInterceptor implements WebGraphQlInterceptor {
         }
 
         String document = request.getDocument();
-        if (document != null && !document.isBlank()) {
+        if (document != null && !document.isBlank() && !PERSISTED_QUERY_MARKER.equals(document)) {
             String computed = sha256(document);
             if (!computed.equalsIgnoreCase(hash)) {
                 log.warn("Persisted query hash mismatch: supplied {} but document hashes to {}", hash, computed);

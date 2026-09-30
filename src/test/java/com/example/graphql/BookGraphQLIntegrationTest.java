@@ -979,6 +979,36 @@ class BookGraphQLIntegrationTest {
                 .satisfy(errors -> assertThat(errors).isNotEmpty());
     }
 
+    @Test
+    void persistedQueryHandlesAHashOnlyRequestWithoutAQueryKey() {
+        String document = "query { bookCount }";
+        String hash = sha256Hex(document);
+
+        graphQlTester.document(document)
+                .extension("persistedQuery", Map.of("sha256Hash", hash))
+                .execute()
+                .path("bookCount")
+                .entity(Integer.class)
+                .get();
+
+        // A real APQ client omits "query" entirely, which Spring marks with a sentinel document
+        webTestClient.post().uri("/graphql")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("extensions", Map.of("persistedQuery", Map.of("sha256Hash", hash))))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.bookCount").isNumber();
+
+        webTestClient.post().uri("/graphql")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("extensions", Map.of("persistedQuery", Map.of("sha256Hash", "0".repeat(64)))))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.errors[0].message").isEqualTo("PersistedQueryNotFound");
+    }
+
     private static String sha256Hex(String document) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(document.getBytes(StandardCharsets.UTF_8));
