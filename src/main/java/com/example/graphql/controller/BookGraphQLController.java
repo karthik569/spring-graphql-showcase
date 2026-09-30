@@ -324,7 +324,7 @@ public class BookGraphQLController {
     @SchemaMapping(typeName = "Author", field = "email")
     @PreAuthorize("isAuthenticated()")
     public String email(Author author) {
-        return author.name().toLowerCase(Locale.ROOT).replace(' ', '.') + "@example.com";
+        return author.name().toLowerCase(Locale.ROOT).replaceAll("[^a-z]+", ".") + "@example.com";
     }
 
     /**
