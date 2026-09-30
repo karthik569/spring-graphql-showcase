@@ -555,14 +555,18 @@ class BookGraphQLIntegrationTest {
 
     @Test
     void queriesExceedingMaxDepthAreRejected() {
-        graphQlTester.document("""
-                        query {
-                          books { author { books { author { books { author { books { author { books { author { books { title } } } } } } } } } } }
-                        }
-                        """)
+        String nested = "books { title }";
+        for (int i = 0; i < 6; i++) {
+            nested = "books { author { " + nested + " } }";
+        }
+
+        graphQlTester.document("query { " + nested + " }")
                 .execute()
                 .errors()
-                .satisfy(errors -> assertThat(errors).isNotEmpty());
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getMessage()).contains("depth");
+                });
     }
 
     @Test
@@ -576,7 +580,10 @@ class BookGraphQLIntegrationTest {
         graphQlTester.document(document.toString())
                 .execute()
                 .errors()
-                .satisfy(errors -> assertThat(errors).isNotEmpty());
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getMessage()).contains("complexity");
+                });
     }
 
     @Test
@@ -586,7 +593,10 @@ class BookGraphQLIntegrationTest {
         graphQlTester.document(document)
                 .execute()
                 .errors()
-                .satisfy(errors -> assertThat(errors).isNotEmpty());
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getMessage()).contains("exceeds the maximum");
+                });
     }
 
     @Test
@@ -597,7 +607,7 @@ class BookGraphQLIntegrationTest {
                 .entity(Integer.class)
                 .get();
 
-        assertThat(meterRegistry.find("graphql.request").timers()).isNotEmpty();
+        assertThat(meterRegistry.find("graphql.request.duration").timers()).isNotEmpty();
     }
 
     private List<String> titles(String document) {

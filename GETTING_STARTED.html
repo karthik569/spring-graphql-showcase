@@ -872,8 +872,9 @@ public Instrumentation maxQueryDepthInstrumentation(GraphQlLimitsProperties prop
     return new MaxQueryDepthInstrumentation(properties.getMaxDepth());
 }</code></pre>
 
-    <p>Because every request passes through the interceptor, a Micrometer timer is available from the actuator:</p>
-    <pre><code>curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
+    <p>The interceptor records its own timer, and Spring Boot auto-instruments GraphQL requests too — so both are visible from the actuator:</p>
+    <pre><code>curl -s http://localhost:8086/actuator/metrics/graphql.request.duration
+curl -s http://localhost:8086/actuator/metrics/graphql.request</code></pre>
   </section>
 
   <section id="exercises">

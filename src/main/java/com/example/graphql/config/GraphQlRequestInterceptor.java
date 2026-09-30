@@ -42,7 +42,7 @@ public class GraphQlRequestInterceptor implements WebGraphQlInterceptor {
 
         log.info("GraphQL request '{}' completed in {} ms ({})", operation, duration.toMillis(), outcome);
 
-        Timer.builder("graphql.request")
+        Timer.builder("graphql.request.duration")
                 .description("GraphQL request duration")
                 .tag("operation", operation)
                 .tag("outcome", outcome)

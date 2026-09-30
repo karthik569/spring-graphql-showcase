@@ -25,7 +25,7 @@ A production-grade GraphQL server implementing **Schema-First Design**, `@QueryM
 - **`Flux<Book> bookAdded()`**: `@SubscriptionMapping`; streams newly created books to subscribers over WebSocket.
 - **`GraphQlScalarConfig`**: registers the hand-written `DateTime` (ISO-8601) and `URL` custom scalars.
 - **`GraphQlLimitsConfiguration`**: `Instrumentation` beans enforcing max query depth, complexity, and length (see `graphql.limits`).
-- **`GraphQlRequestInterceptor`**: logs each operation with its duration and records a Micrometer `graphql.request` timer.
+- **`GraphQlRequestInterceptor`**: logs each operation with its duration and records a Micrometer `graphql.request.duration` timer. Spring Boot additionally auto-instruments GraphQL requests as `graphql.request`.
 - **`GraphQlExceptionResolver`**: maps `BookNotFoundException` / `AuthorNotFoundException` to NOT_FOUND and `InvalidBookInputException` to BAD_REQUEST.
 
 ---

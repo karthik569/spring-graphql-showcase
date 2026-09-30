@@ -136,4 +136,4 @@ The application runs on port `8086` using **Spring for GraphQL** and provides an
 
 #### `GraphQlRequestInterceptor`
 - *Annotation*: `@Component` implementing `WebGraphQlInterceptor`.
-- *Operation*: Times every GraphQL request, logs the operation with its duration and outcome, and records a Micrometer timer named `graphql.request` tagged by `operation` and `outcome`.
+- *Operation*: Times every GraphQL request, logs the operation with its duration and outcome, and records a Micrometer timer named `graphql.request.duration` tagged by `operation` and `outcome`. Spring Boot separately auto-instruments GraphQL requests as `graphql.request`.
