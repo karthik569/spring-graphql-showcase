@@ -159,6 +159,10 @@
       <li><a href="#lifecycle">How a query executes</a></li>
       <li><a href="#nplus1">The N+1 problem and @BatchMapping</a></li>
       <li><a href="#ops">Operation reference</a></li>
+      <li><a href="#query-power">Filtering, sorting, and pagination</a></li>
+      <li><a href="#reverse">Reverse batching: Author.books</a></li>
+      <li><a href="#errors">Typed GraphQL errors</a></li>
+      <li><a href="#subscriptions">Real-time subscriptions</a></li>
       <li><a href="#exercises">Hands-on exercises</a></li>
       <li><a href="#verify">Verifying it works</a></li>
       <li><a href="#logging">Logging and observability</a></li>
@@ -171,11 +175,14 @@
   <section id="what">
     <h2>1. What this repo is</h2>
     <p>This is a small, self-contained <strong>GraphQL server</strong> built with <em>Spring for GraphQL</em>. It serves a tiny book catalog from in-memory maps — there is no database — so you can focus entirely on <em>how GraphQL wiring works in Spring</em>.</p>
-    <p>It deliberately demonstrates three things:</p>
+    <p>It deliberately demonstrates:</p>
     <ul>
       <li><strong>Schema-first design</strong> — the GraphQL contract lives in one file, <code>schema.graphqls</code>, and Java code is written to satisfy it.</li>
       <li><strong>Queries and mutations</strong> — read operations via <code>@QueryMapping</code>, write operations via <code>@MutationMapping</code>.</li>
-      <li><strong>Batched relationship loading</strong> — <code>@BatchMapping</code> with the GraphQL DataLoader to solve the classic N+1 problem.</li>
+      <li><strong>Batched relationship loading</strong> — <code>@BatchMapping</code> with the GraphQL DataLoader to solve the classic N+1 problem, in both directions.</li>
+      <li><strong>Query power</strong> — filtering, sorting, and offset pagination driven by input objects and enums.</li>
+      <li><strong>Typed errors</strong> — domain exceptions mapped to NOT_FOUND / BAD_REQUEST classifications.</li>
+      <li><strong>Real-time updates</strong> — a <code>bookAdded</code> subscription streamed over WebSocket.</li>
     </ul>
     <div class="callout">
       <p class="label">Mental model</p>
@@ -319,17 +326,24 @@ Tomcat started on port 8086 (http)</code></pre>
 flowchart TB
   Client["GraphQL Client / GraphiQL IDE (localhost:8086/graphiql)"]
   Http["Spring MVC endpoint POST /graphql"]
+  Ws["WebSocket endpoint /graphql (subscriptions)"]
   Engine["Spring for GraphQL Engine"]
   Controller["BookGraphQLController"]
   Service["CatalogDataService (in-memory)"]
+  Publisher["BookEventPublisher"]
   BooksStore["books Map"]
   AuthorsStore["authors Map"]
 
-  Client -->|"HTTP JSON request"| Http
+  Client -->|"HTTP JSON query or mutation"| Http
+  Client -->|"subscription over WebSocket"| Ws
   Http --> Engine
+  Ws --> Engine
   Engine -->|"@QueryMapping and @MutationMapping"| Controller
+  Engine -->|"@SubscriptionMapping bookAdded"| Controller
   Controller -->|"plain method call"| Service
-  Controller -->|"@BatchMapping author(books)"| Service
+  Controller -->|"@BatchMapping in both directions"| Service
+  Controller -->|"stream()"| Publisher
+  Service -->|"publish(book)"| Publisher
   Service --> BooksStore
   Service --> AuthorsStore
         </pre>
@@ -454,7 +468,8 @@ public Map&lt;Book, Author&gt; author(List&lt;Book&gt; books) {
     <table>
       <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
       <tbody>
-        <tr><td><code>books</code></td><td><code>books: [Book!]!</code></td><td><code>books()</code></td></tr>
+        <tr><td><code>books</code></td><td><code>books(filter: BookFilter, sort: BookSort, limit: Int, offset: Int): [Book!]!</code></td><td><code>books(BookFilter, BookSort, Integer, Integer)</code></td></tr>
+        <tr><td><code>bookCount</code></td><td><code>bookCount(filter: BookFilter): Int!</code></td><td><code>bookCount(BookFilter)</code></td></tr>
         <tr><td><code>bookById</code></td><td><code>bookById(id: ID!): Book</code></td><td><code>bookById(String id)</code></td></tr>
         <tr><td><code>authors</code></td><td><code>authors: [Author!]!</code></td><td><code>authors()</code></td></tr>
         <tr><td><code>authorById</code></td><td><code>authorById(id: ID!): Author</code></td><td><code>authorById(String id)</code></td></tr>
@@ -478,7 +493,17 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
       <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
       <tbody>
         <tr><td><code>addBook</code></td><td><code>addBook(input: BookInput!): Book!</code></td><td><code>addBook(BookInput input)</code></td></tr>
-        <tr><td><code>updateStock</code></td><td><code>updateStock(id: ID!, stock: Int!): Book!</code></td><td><code>updateStock(String id, int stock)</code></td></tr>
+        <tr><td><code>updateBook</code></td><td><code>updateBook(id: ID!, input: BookUpdateInput!): Book!</code></td><td><code>updateBook(String id, BookUpdateInput input)</code></td></tr>
+        <tr><td><code>deleteBook</code></td><td><code>deleteBook(id: ID!): Boolean!</code></td><td><code>deleteBook(String id)</code></td></tr>
+        <tr><td><code>updateStock</code> <em>(deprecated)</em></td><td><code>updateStock(id: ID!, stock: Int!): Book! @deprecated</code></td><td><code>updateStock(String id, int stock)</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Subscription</h3>
+    <table>
+      <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
+      <tbody>
+        <tr><td><code>bookAdded</code></td><td><code>bookAdded: Book!</code></td><td><code>bookAdded()</code> returning <code>Flux&lt;Book&gt;</code></td></tr>
       </tbody>
     </table>
     <p><code>BookInput</code> is an <strong>input type</strong> — the GraphQL way to pass a group of arguments:</p>
@@ -502,21 +527,217 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
     </div>
   </section>
 
+  <section id="query-power">
+    <h2>10. Filtering, sorting, and pagination</h2>
+    <p>The <code>books</code> field accepts three optional arguments, so the simple <code>books { title }</code> form still works while richer clients get filtering, ordering, and paging. Pagination is offset-based (<code>limit</code> + <code>offset</code>), paired with <code>bookCount</code> for totals — deliberately simpler than Relay cursor connections.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Query pipeline</strong> — the service filters, then sorts, then pages. Ordering matters: paging an unordered map would be meaningless.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+flowchart LR
+  Store["books Map (unordered)"] --> Filter["filter: BookFilter"]
+  Filter --> Sort["sort: BookSort (default TITLE_ASC)"]
+  Sort --> Page["offset then limit"]
+  Page --> Result["List of Book"]
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>Two new schema types model the arguments — an <strong>input object</strong> for the optional filter flags and an <strong>enum</strong> for the sort choice:</p>
+    <pre><code>input BookFilter {
+    titleContains: String
+    authorId: ID
+    minPrice: Float
+    maxPrice: Float
+    inStock: Boolean
+}
+
+enum BookSort {
+    TITLE_ASC  TITLE_DESC
+    PRICE_ASC  PRICE_DESC
+    STOCK_ASC  STOCK_DESC
+}</code></pre>
+
+    <pre><code># Books by Joshua Bloch, cheapest first
+query {
+  books(filter: {authorId: "author-1"}, sort: PRICE_ASC) {
+    title
+    price
+  }
+}
+
+# Second page of two, plus the total for that filter
+query {
+  books(sort: TITLE_ASC, limit: 2, offset: 2) { title }
+  bookCount(filter: {inStock: true})
+}</code></pre>
+
+    <pre><code>curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { books(filter: {authorId: \"author-1\"}, sort: PRICE_ASC) { title price } }"}'</code></pre>
+
+    <div class="callout">
+      <p class="label">Why sorting defaults to TITLE_ASC</p>
+      <p>The catalog lives in a <code>ConcurrentHashMap</code>, so its iteration order is not stable. Applying a deterministic default sort before paging keeps results reproducible from run to run.</p>
+    </div>
+  </section>
+
+  <section id="reverse">
+    <h2>11. Reverse batching: Author.books</h2>
+    <p>The existing <code>Book.author</code> field batches forward. The schema now has the mirror image — <code>Author.books</code> — resolved by a <em>second</em> <code>@BatchMapping</code>. It is the same DataLoader trick, run in the opposite direction.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Reverse sequence view</strong> — one <code>authors()</code> call and one batched <code>books(authors)</code> call.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as GraphQL Client
+  participant E as Spring for GraphQL Engine
+  participant Q as BookGraphQLController.authors()
+  participant B as BookGraphQLController.books() @BatchMapping
+  participant S as CatalogDataService
+
+  C->>E: POST /graphql  query authors with books
+  E->>Q: authors()
+  Q->>S: getAllAuthors()
+  S-->>Q: List of 3 authors
+  Q-->>E: 3 Author objects
+  Note over E,B: Engine defers books and collects ALL parent Authors
+  E->>B: books(List of 3 authors) called ONCE
+  B->>S: getBooksForAuthors(3 authors)
+  S-->>B: Map Author to books in a single bulk lookup
+  B-->>E: books for every author
+  E-->>C: JSON with authors and nested books
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <pre><code>@BatchMapping(typeName = "Author", field = "books")
+public Map&lt;Author, List&lt;Book&gt;&gt; books(List&lt;Author&gt; authors) {
+    return catalogService.getBooksForAuthors(authors);
+}</code></pre>
+    <p>Note the return type: <code>Map&lt;Author, List&lt;Book&gt;&gt;</code>, because each author now maps to <em>many</em> books. An author with no books maps to an empty list — never null — so the non-null <code>[Book!]!</code> list is always satisfied.</p>
+
+    <pre><code>curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { authors { name books { title } } }"}'</code></pre>
+  </section>
+
+  <section id="errors">
+    <h2>12. Typed GraphQL errors</h2>
+    <p>By default a thrown exception becomes an opaque <code>INTERNAL_ERROR</code>, which tells a client nothing. The service now throws domain exceptions, and a <code>DataFetcherExceptionResolverAdapter</code> maps them onto GraphQL error classifications.</p>
+
+    <table>
+      <thead><tr><th>Domain exception</th><th>GraphQL classification</th><th>Raised by</th></tr></thead>
+      <tbody>
+        <tr><td><code>BookNotFoundException</code></td><td><code>NOT_FOUND</code></td><td><code>updateBook</code>, <code>deleteBook</code>, <code>updateStock</code></td></tr>
+        <tr><td><code>AuthorNotFoundException</code></td><td><code>NOT_FOUND</code></td><td>unknown <code>authorId</code> on create/update</td></tr>
+        <tr><td><code>InvalidBookInputException</code></td><td><code>BAD_REQUEST</code></td><td>blank title, non-positive pages, negative price or stock</td></tr>
+      </tbody>
+    </table>
+
+    <pre><code>@Component
+public class GraphQlExceptionResolver extends DataFetcherExceptionResolverAdapter {
+
+    @Override
+    protected GraphQLError resolveToSingleError(Throwable ex, DataFetchingEnvironment env) {
+        if (ex instanceof BookNotFoundException || ex instanceof AuthorNotFoundException) {
+            return toError(ex, ErrorType.NOT_FOUND, env);
+        }
+        if (ex instanceof InvalidBookInputException) {
+            return toError(ex, ErrorType.BAD_REQUEST, env);
+        }
+        return null;
+    }
+}</code></pre>
+
+    <p>Deleting a book that does not exist now returns a typed classification instead of a generic internal error:</p>
+    <pre><code>curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"mutation { deleteBook(id: \"book-999\") }"}'
+
+# {
+#   "errors": [{
+#     "message": "Book not found: book-999",
+#     "extensions": { "classification": "NOT_FOUND" }
+#   }],
+#   "data": { "deleteBook": null }
+# }</code></pre>
+  </section>
+
+  <section id="subscriptions">
+    <h2>13. Real-time subscriptions</h2>
+    <p>GraphQL subscriptions let a server <em>push</em> events to a client over a long-lived connection. Here, <code>bookAdded</code> streams every newly created book over WebSocket at <code>ws://localhost:8086/graphql</code>.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Subscription flow</strong> — the connection stays open; the mutation that adds a book publishes the event.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as GraphQL Client
+  participant W as GraphQL WebSocket endpoint
+  participant S as BookGraphQLController.bookAdded()
+  participant P as BookEventPublisher
+  participant D as CatalogDataService
+
+  C->>W: subscribe to bookAdded (graphql-transport-ws)
+  W->>S: bookAdded()
+  S->>P: stream()
+  P-->>S: Flux of Book events
+  Note over C,P: the connection stays open, events are pushed as they happen
+  D->>P: publish(book) after addBook
+  P-->>W: onNext(book)
+  W-->>C: push bookAdded event to the client
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>The resolver returns a <code>Flux</code> backed by a reactive sink, and the create path feeds it:</p>
+    <pre><code>@Component
+public class BookEventPublisher {
+    private final Sinks.Many&lt;Book&gt; sink = Sinks.many().multicast().directBestEffort();
+
+    public void publish(Book book) { sink.tryEmitNext(book); }
+    public Flux&lt;Book&gt; stream() { return sink.asFlux(); }
+}
+
+@SubscriptionMapping
+public Flux&lt;Book&gt; bookAdded() { return publisher.stream(); }</code></pre>
+
+    <p>Wiring this up needed two changes beyond the code: the <code>spring-boot-starter-websocket</code> dependency, and setting <code>spring.graphql.websocket.path</code> — Spring Boot does <strong>not</strong> expose a GraphQL-over-WebSocket endpoint unless you ask for one.</p>
+
+    <p>Try it in GraphiQL: open <code>http://localhost:8086/graphiql</code>, run the subscription in one tab, then run <code>addBook</code> from a second tab. The event appears in the first.</p>
+    <pre><code>subscription {
+  bookAdded { id title }
+}</code></pre>
+  </section>
+
   <section id="exercises">
-    <h2>10. Hands-on exercises</h2>
+    <h2>14. Hands-on exercises</h2>
     <p>Try these in GraphiQL (<a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>) — it gives you autocomplete and error highlighting.</p>
     <ol>
       <li><strong>Field selection.</strong> Query only <code>books { title }</code>, then only <code>books { title price }</code>. Notice the response changes shape with the request. That is GraphQL's core promise over REST.</li>
       <li><strong>Null handling.</strong> Run <code>bookById(id: "does-not-exist") { id title }</code>. It returns <code>{"data":{"bookById":null}}</code> — a nullable field simply returns null, without an HTTP error.</li>
       <li><strong>Create then read.</strong> Run the <code>addBook</code> mutation, note the returned ID, then query <code>bookById</code> for that ID. The new book is in memory for the lifetime of the process.</li>
-      <li><strong>Error path.</strong> Run <code>updateStock(id: "book-999", stock: 1)</code>. The service throws <code>IllegalArgumentException</code>, and GraphQL returns an <code>errors</code> array instead of <code>data</code>.</li>
+      <li><strong>Error path.</strong> Run <code>updateStock(id: "book-999", stock: 1)</code>. The service throws <code>BookNotFoundException</code>, and GraphQL returns an <code>errors</code> array classified <code>NOT_FOUND</code> instead of <code>data</code>.</li>
       <li><strong>Watch the batching.</strong> Call <code>books { title author { name } }</code> and immediately check the console or the log file for a single <code>GRAPHQL-BATCH-MAPPING</code> line.</li>
-      <li><strong>Extend the schema.</strong> Add a <code>deleteBook(id: ID!): Boolean!</code> mutation: edit <code>schema.graphqls</code>, add a service method, and add a <code>@MutationMapping</code>. Restart and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
+      <li><strong>Filter and page.</strong> Run <code>books(filter: {minPrice: 40.0}, sort: PRICE_DESC, limit: 2) { title price }</code> and confirm you get the two most expensive books at or above 40.0.</li>
+      <li><strong>Count versus list.</strong> Compare <code>bookCount(filter: {inStock: true})</code> with the length of <code>books(filter: {inStock: true})</code> — they must always agree.</li>
+      <li><strong>Both batch directions.</strong> Query <code>books { author { name } }</code>, then <code>authors { books { title } }</code>, and watch for one <code>GRAPHQL-BATCH-MAPPING</code> line per request.</li>
+      <li><strong>Trigger typed errors.</strong> Run <code>updateBook(id: "book-999", input: {stock: 1})</code> and inspect <code>extensions.classification</code> (NOT_FOUND). Then send <code>input: {pages: 0}</code> against a real book and expect BAD_REQUEST.</li>
+      <li><strong>Subscribe to changes.</strong> In GraphiQL run <code>subscription { bookAdded { id title } }</code>, then run <code>addBook</code> from a second tab and watch the event arrive.</li>
+      <li><strong>Extend the schema.</strong> Add a new field of your own — edit <code>schema.graphqls</code>, add the resolver, restart, and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
     </ol>
   </section>
 
   <section id="verify">
-    <h2>11. Verifying it works</h2>
+    <h2>15. Verifying it works</h2>
     <p>After starting the app, verify in layers — cheapest first:</p>
     <table>
       <thead><tr><th>Check</th><th>Command / action</th><th>Expected</th></tr></thead>
@@ -525,9 +746,13 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
         <tr><td>Schema fully wired</td><td>Inspect the startup log</td><td><code>Unmapped fields: {}</code></td></tr>
         <tr><td>Reads work</td><td>POST <code>books</code>, <code>bookById</code>, <code>authors</code>, <code>authorById</code></td><td><code>data</code> present, no <code>errors</code></td></tr>
         <tr><td>Writes work</td><td>POST <code>addBook</code>, then read it back</td><td>The new book is returned and queryable</td></tr>
-        <tr><td>Errors are handled</td><td>POST <code>updateStock</code> with a bad ID</td><td>An <code>errors</code> array, not a crash</td></tr>
+        <tr><td>Errors are handled</td><td>POST <code>updateStock</code> with a bad ID</td><td>An <code>errors</code> array classified NOT_FOUND, not a crash</td></tr>
         <tr><td>N+1 is solved</td><td>Query <code>books { author { name } }</code>, check the log</td><td>Exactly one <code>GRAPHQL-BATCH-MAPPING</code> line</td></tr>
-        <tr><td>Data layer unit tests</td><td><code>mvn test</code></td><td>Tests run: 3, Failures: 0, Errors: 0</td></tr>
+        <tr><td>Filtering, sorting, paging</td><td><code>books(filter: {authorId: "author-1"}, sort: PRICE_ASC, limit: 1)</code></td><td>The cheapest book by that author</td></tr>
+        <tr><td>Reverse batching works</td><td><code>authors { books { title } }</code>, check the log</td><td>Every author has a non-null <code>books</code> list and one batch line appears</td></tr>
+        <tr><td>Errors are typed</td><td><code>deleteBook(id: "book-999")</code></td><td><code>extensions.classification = "NOT_FOUND"</code></td></tr>
+        <tr><td>Subscriptions stream</td><td>GraphiQL <code>subscription { bookAdded { id title } }</code>, then <code>addBook</code></td><td>The new book is pushed to the subscriber</td></tr>
+        <tr><td>Full test suite</td><td><code>mvn test</code></td><td>Tests run: 35, Failures: 0, Errors: 0</td></tr>
       </tbody>
     </table>
     <div class="callout">
@@ -537,7 +762,7 @@ curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json
   </section>
 
   <section id="logging">
-    <h2>12. Logging and observability</h2>
+    <h2>16. Logging and observability</h2>
     <p>The app logs through <strong>SLF4J + Logback</strong> (Logback comes in with <code>spring-boot-starter-web</code>). Configuration lives in <code>application.yml</code>:</p>
     <pre><code>logging:
   level:
@@ -558,7 +783,7 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="troubleshoot">
-    <h2>13. Troubleshooting</h2>
+    <h2>17. Troubleshooting</h2>
     <table>
       <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
       <tbody>
@@ -572,18 +797,18 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
   </section>
 
   <section id="next">
-    <h2>14. Where to go next</h2>
+    <h2>18. Where to go next</h2>
     <ul>
-      <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is 30 lines and defines the entire API surface.</li>
+      <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is the single source of truth for the entire API surface.</li>
       <li><strong>Follow one request end to end.</strong> Start in <code>BookGraphQLController</code>, then read the matching method in <code>CatalogDataService</code>.</li>
       <li><strong>Go deeper on methods.</strong> <code>ARCHITECTURE_AND_METHODS.md</code> explains each method in more detail.</li>
-      <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>getAllBooks()</code> returns map values so ordering is not guaranteed, and <code>saveBook</code> derives IDs from map size, which can collide in more complex scenarios.</li>
-      <li><strong>Next real-world steps.</strong> Persist to a database, add pagination for <code>books</code>, introduce a <code>Book.author</code> field with a <code>@SchemaMapping</code>, and add integration tests with <code>GraphQlTester</code> from <code>spring-graphql-test</code>.</li>
+      <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>saveBook</code> derives IDs from map size (fine for a demo, collision-prone in general), and the multicast event sink drops events emitted while nobody is subscribed.</li>
+      <li><strong>Next real-world steps.</strong> Persist to a database, move to Relay cursor pagination, add authentication and field-level authorization, and add query depth/complexity limits.</li>
     </ul>
   </section>
 
   <section id="glossary">
-    <h2>15. Glossary</h2>
+    <h2>19. Glossary</h2>
     <table>
       <thead><tr><th>Term</th><th>Definition</th></tr></thead>
       <tbody>
@@ -597,6 +822,11 @@ Mutation 'updateStock' id='book-1' stock=123 -> updated
         <tr><td><strong>N+1 problem</strong></td><td>Executing one query for a list plus one query per item for a nested field, producing 1+N round-trips.</td></tr>
         <tr><td><strong>GraphiQL</strong></td><td>An in-browser IDE for exploring and running GraphQL operations.</td></tr>
         <tr><td><strong>Input type</strong></td><td>A schema type used to pass structured arguments into a mutation, e.g. <code>BookInput</code>.</td></tr>
+        <tr><td><strong>Enum</strong></td><td>A schema type with a fixed set of values, e.g. <code>BookSort</code>. Clients get validation and autocomplete for free.</td></tr>
+        <tr><td><strong>Pagination</strong></td><td>Returning one page of a larger result set. This app uses offset pagination (<code>limit</code> + <code>offset</code>) plus a separate count.</td></tr>
+        <tr><td><strong>Error classification</strong></td><td>The <code>extensions.classification</code> on a GraphQL error, e.g. NOT_FOUND or BAD_REQUEST, giving clients a machine-readable failure kind.</td></tr>
+        <tr><td><strong>Subscription</strong></td><td>A long-lived GraphQL operation that streams events from server to client, typically over WebSocket.</td></tr>
+        <tr><td><strong>Reverse batch mapping</strong></td><td>Batching a one-to-many relationship in the opposite direction, e.g. resolving many books per author in a single call.</td></tr>
       </tbody>
     </table>
   </section>
