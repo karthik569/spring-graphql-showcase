@@ -55,7 +55,11 @@ public class GraphQlScalarConfig implements RuntimeWiringConfigurer {
                 public Instant parseLiteral(Value<?> input, CoercedVariables variables,
                                             GraphQLContext context, Locale locale) {
                     if (input instanceof StringValue stringValue) {
-                        return parseValue(stringValue.getValue(), context, locale);
+                        try {
+                            return Instant.parse(stringValue.getValue());
+                        } catch (DateTimeParseException ex) {
+                            throw new CoercingParseLiteralException("Invalid DateTime: " + stringValue.getValue());
+                        }
                     }
                     throw new CoercingParseLiteralException("DateTime must be a string literal");
                 }
@@ -90,7 +94,11 @@ public class GraphQlScalarConfig implements RuntimeWiringConfigurer {
                 public URI parseLiteral(Value<?> input, CoercedVariables variables,
                                         GraphQLContext context, Locale locale) {
                     if (input instanceof StringValue stringValue) {
-                        return parseValue(stringValue.getValue(), context, locale);
+                        try {
+                            return new URI(stringValue.getValue());
+                        } catch (URISyntaxException ex) {
+                            throw new CoercingParseLiteralException("Invalid URL: " + stringValue.getValue());
+                        }
                     }
                     throw new CoercingParseLiteralException("URL must be a string literal");
                 }

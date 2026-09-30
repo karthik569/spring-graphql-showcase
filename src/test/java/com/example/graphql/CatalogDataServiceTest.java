@@ -18,6 +18,7 @@ import com.example.graphql.repository.CatalogDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -177,7 +178,7 @@ class CatalogDataServiceTest {
     void testGetPublicationsIncludesBooksAndMagazines() {
         List<Publication> publications = service.getPublications();
 
-        assertEquals(6, publications.size());
+        assertEquals(7, publications.size());
         assertTrue(publications.stream().anyMatch(publication -> publication.id().equals("book-1")));
         assertTrue(publications.stream().anyMatch(publication -> publication.id().equals("magazine-1")));
     }
@@ -242,7 +243,19 @@ class CatalogDataServiceTest {
         PublicationConnection connection = service.publicationConnection(3, null);
 
         assertEquals(3, connection.edges().size());
-        assertEquals(6, connection.totalCount());
+        assertEquals(7, connection.totalCount());
         assertTrue(connection.pageInfo().hasNextPage());
+    }
+
+    @Test
+    void testMagazinesPublishedAfterFiltersAndSorts() {
+        List<Magazine> magazines = service.magazinesPublishedAfter(Instant.parse("2024-06-01T00:00:00Z"));
+
+        assertEquals(List.of("magazine-2", "magazine-3"), magazines.stream().map(Magazine::id).toList());
+    }
+
+    @Test
+    void testMagazineWithoutAWebsiteIsAllowed() {
+        assertNull(service.getMagazineById("magazine-3").orElseThrow().website());
     }
 }

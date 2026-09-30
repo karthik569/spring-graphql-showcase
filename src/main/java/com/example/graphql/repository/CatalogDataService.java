@@ -59,6 +59,8 @@ public class CatalogDataService {
                 Instant.parse("2024-05-01T00:00:00Z"), URI.create("https://javamagazine.example.com")));
         magazines.put("magazine-2", new Magazine("magazine-2", "GraphQL Weekly", 7, "GraphQL Foundation",
                 Instant.parse("2024-06-15T00:00:00Z"), URI.create("https://graphqlweekly.example.com")));
+        magazines.put("magazine-3", new Magazine("magazine-3", "Spring Weekly", 3, "VMware",
+                Instant.parse("2024-07-01T00:00:00Z"), null));
     }
 
     public List<Book> getAllBooks() {
@@ -79,6 +81,17 @@ public class CatalogDataService {
 
     public Optional<Magazine> getMagazineById(String id) {
         return Optional.ofNullable(magazines.get(id));
+    }
+
+    /**
+     * Magazines published at or after the given instant, ordered by publication date. Exercises a
+     * custom scalar as an input rather than an output.
+     */
+    public List<Magazine> magazinesPublishedAfter(Instant since) {
+        return magazines.values().stream()
+                .filter(magazine -> !magazine.publishedOn().isBefore(since))
+                .sorted(Comparator.comparing(Magazine::publishedOn).thenComparing(Magazine::id))
+                .toList();
     }
 
     /**

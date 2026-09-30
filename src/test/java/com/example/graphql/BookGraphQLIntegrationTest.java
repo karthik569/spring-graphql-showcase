@@ -800,6 +800,50 @@ class BookGraphQLIntegrationTest {
         assertThat(typenames).containsAnyOf("Book", "Magazine");
     }
 
+    @Test
+    void magazinesCanBeFilteredByDateTimeArgument() {
+        List<MagazineView> magazines = graphQlTester.document("""
+                        query ($since: DateTime!) {
+                          magazinesPublishedAfter(since: $since) { id title publishedOn website }
+                        }
+                        """)
+                .variable("since", "2024-06-01T00:00:00Z")
+                .execute()
+                .path("magazinesPublishedAfter")
+                .entityList(MagazineView.class)
+                .get();
+
+        assertThat(magazines).extracting(MagazineView::id)
+                .containsExactly("magazine-2", "magazine-3");
+    }
+
+    @Test
+    void invalidDateTimeArgumentIsRejected() {
+        graphQlTester.document("""
+                        query { magazinesPublishedAfter(since: "not-a-date") { id } }
+                        """)
+                .execute()
+                .errors()
+                .satisfy(errors -> {
+                    assertThat(errors).isNotEmpty();
+                    assertThat(errors.get(0).getMessage()).contains("DateTime");
+                });
+    }
+
+    @Test
+    void nullableMagazineWebsiteReturnsNull() {
+        MagazineView magazine = graphQlTester.document("""
+                        query { magazineById(id: "magazine-3") { id title publishedOn website } }
+                        """)
+                .execute()
+                .path("magazineById")
+                .entity(MagazineView.class)
+                .get();
+
+        assertThat(magazine.website()).isNull();
+        assertThat(magazine.publishedOn()).isEqualTo("2024-07-01T00:00:00Z");
+    }
+
     private List<String> titles(String document) {
         return graphQlTester.document(document)
                 .execute()

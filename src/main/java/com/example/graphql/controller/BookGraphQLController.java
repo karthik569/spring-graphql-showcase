@@ -25,6 +25,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -141,6 +142,19 @@ public class BookGraphQLController {
         log.info("Query 'publicationConnection' first={} after={} -> {} edge(s) of {} total",
                 first, after, connection.edges().size(), connection.totalCount());
         return connection;
+    }
+
+    /**
+     * Resolves {@code magazinesPublishedAfter(since: DateTime!)}, exercising the custom scalar as an argument.
+     *
+     * @param since inclusive lower bound on the publication date
+     * @return matching magazines ordered by publication date
+     */
+    @QueryMapping
+    public List<Magazine> magazinesPublishedAfter(@Argument Instant since) {
+        List<Magazine> magazines = catalogService.magazinesPublishedAfter(since);
+        log.info("Query 'magazinesPublishedAfter' since={} -> {} magazine(s)", since, magazines.size());
+        return magazines;
     }
 
     /**

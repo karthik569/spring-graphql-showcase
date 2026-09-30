@@ -10,6 +10,7 @@ type Query {
     bookConnection(first: Int, after: String, filter: BookFilter, sort: BookSort): BookConnection!
     authorConnection(first: Int, after: String): AuthorConnection!
     publicationConnection(first: Int, after: String): PublicationConnection!
+    magazinesPublishedAfter(since: DateTime!): [Magazine!]!
 }
 
 type Mutation {
