@@ -2,7 +2,9 @@ package com.example.graphql.controller;
 
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
+import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookInput;
+import com.example.graphql.model.BookSort;
 import com.example.graphql.repository.CatalogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,15 +48,34 @@ public class BookGraphQLController {
     }
 
     /**
-     * Resolves the top-level {@code books} query returning all catalog books.
+     * Resolves the top-level {@code books} query, optionally filtering, sorting, and paging the catalog.
      *
-     * @return list of all available {@link Book} records
+     * @param filter optional filter on title, author, price, and stock
+     * @param sort   optional sort order (defaults to title ascending)
+     * @param limit  optional maximum number of books to return
+     * @param offset optional number of books to skip
+     * @return the matching {@link Book} records
      */
     @QueryMapping
-    public List<Book> books() {
-        List<Book> books = catalogService.getAllBooks();
-        log.info("Query 'books' -> returning {} book(s)", books.size());
+    public List<Book> books(@Argument BookFilter filter, @Argument BookSort sort,
+                            @Argument Integer limit, @Argument Integer offset) {
+        List<Book> books = catalogService.findBooks(filter, sort, limit, offset);
+        log.info("Query 'books' filter={} sort={} limit={} offset={} -> returning {} book(s)",
+                filter, sort, limit, offset, books.size());
         return books;
+    }
+
+    /**
+     * Resolves the {@code bookCount(filter: BookFilter)} query returning the number of matching books.
+     *
+     * @param filter optional filter on title, author, price, and stock
+     * @return the number of books matching the filter
+     */
+    @QueryMapping
+    public int bookCount(@Argument BookFilter filter) {
+        int count = catalogService.countBooks(filter);
+        log.info("Query 'bookCount' filter={} -> {}", filter, count);
+        return count;
     }
 
     /**

@@ -1,5 +1,6 @@
 type Query {
-    books: [Book!]!
+    books(filter: BookFilter, sort: BookSort, limit: Int, offset: Int): [Book!]!
+    bookCount(filter: BookFilter): Int!
     bookById(id: ID!): Book
     authors: [Author!]!
     authorById(id: ID!): Author
@@ -31,4 +32,21 @@ input BookInput {
     price: Float!
     stock: Int!
     authorId: ID!
+}
+
+input BookFilter {
+    titleContains: String
+    authorId: ID
+    minPrice: Float
+    maxPrice: Float
+    inStock: Boolean
+}
+
+enum BookSort {
+    TITLE_ASC
+    TITLE_DESC
+    PRICE_ASC
+    PRICE_DESC
+    STOCK_ASC
+    STOCK_DESC
 }

@@ -2,12 +2,15 @@ package com.example.graphql.repository;
 
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
+import com.example.graphql.model.BookFilter;
+import com.example.graphql.model.BookSort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 @Service
 public class CatalogDataService {
@@ -42,6 +45,65 @@ public class CatalogDataService {
 
     public Optional<Author> getAuthorById(String id) {
         return Optional.ofNullable(authors.get(id));
+    }
+
+    /**
+     * Filters, sorts, and pages the catalog. Sorting is applied before paging so results are stable.
+     */
+    public List<Book> findBooks(BookFilter filter, BookSort sort, Integer limit, Integer offset) {
+        Stream<Book> stream = filtered(filter).sorted(comparator(sort));
+        if (offset != null && offset > 0) {
+            stream = stream.skip(offset);
+        }
+        if (limit != null && limit >= 0) {
+            stream = stream.limit(limit);
+        }
+        return stream.toList();
+    }
+
+    public int countBooks(BookFilter filter) {
+        return (int) filtered(filter).count();
+    }
+
+    private Stream<Book> filtered(BookFilter filter) {
+        Stream<Book> stream = books.values().stream();
+        if (filter == null) {
+            return stream;
+        }
+        if (filter.titleContains() != null && !filter.titleContains().isBlank()) {
+            String needle = filter.titleContains().toLowerCase(Locale.ROOT);
+            stream = stream.filter(book -> book.title().toLowerCase(Locale.ROOT).contains(needle));
+        }
+        if (filter.authorId() != null) {
+            stream = stream.filter(book -> filter.authorId().equals(book.authorId()));
+        }
+        if (filter.minPrice() != null) {
+            stream = stream.filter(book -> book.price() >= filter.minPrice());
+        }
+        if (filter.maxPrice() != null) {
+            stream = stream.filter(book -> book.price() <= filter.maxPrice());
+        }
+        if (filter.inStock() != null) {
+            stream = stream.filter(book -> filter.inStock() == (book.stock() > 0));
+        }
+        return stream;
+    }
+
+    private Comparator<Book> comparator(BookSort sort) {
+        Comparator<Book> byId = Comparator.comparing(Book::id);
+        Comparator<Book> byTitle = Comparator.comparing(Book::title, String.CASE_INSENSITIVE_ORDER);
+        Comparator<Book> byPrice = Comparator.comparingDouble(Book::price);
+        Comparator<Book> byStock = Comparator.comparingInt(Book::stock);
+
+        BookSort effective = sort == null ? BookSort.TITLE_ASC : sort;
+        return switch (effective) {
+            case TITLE_ASC -> byTitle.thenComparing(byId);
+            case TITLE_DESC -> byTitle.reversed().thenComparing(byId);
+            case PRICE_ASC -> byPrice.thenComparing(byId);
+            case PRICE_DESC -> byPrice.reversed().thenComparing(byId);
+            case STOCK_ASC -> byStock.thenComparing(byId);
+            case STOCK_DESC -> byStock.reversed().thenComparing(byId);
+        };
     }
 
     /**
