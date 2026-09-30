@@ -24,6 +24,7 @@ type Author {
     id: ID!
     name: String!
     country: String!
+    books: [Book!]!
 }
 
 input BookInput {

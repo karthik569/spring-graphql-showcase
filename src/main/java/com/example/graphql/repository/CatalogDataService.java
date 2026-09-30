@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -119,6 +120,24 @@ public class CatalogDataService {
             if (author != null) {
                 result.put(book, author);
             }
+        }
+        return result;
+    }
+
+    /**
+     * Batch loader solving the N+1 problem in the reverse direction: fetches all books for a list of
+     * authors in 1 operation. Authors without books map to an empty list so the non-null schema list is satisfied.
+     */
+    public Map<Author, List<Book>> getBooksForAuthors(List<Author> authorList) {
+        log.info("[GRAPHQL-BATCH-MAPPING] Batch loading books for {} authors in a SINGLE operation (Preventing N+1!)",
+                authorList.size());
+
+        Map<String, List<Book>> booksByAuthorId = books.values().stream()
+                .collect(Collectors.groupingBy(Book::authorId));
+
+        Map<Author, List<Book>> result = new HashMap<>();
+        for (Author author : authorList) {
+            result.put(author, booksByAuthorId.getOrDefault(author.id(), List.of()));
         }
         return result;
     }

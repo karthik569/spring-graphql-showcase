@@ -163,4 +163,18 @@ public class BookGraphQLController {
     public Map<Book, Author> author(List<Book> books) {
         return catalogService.getAuthorsForBooks(books);
     }
+
+    /**
+     * Batch loader resolving book relationships for a collection of authors in a single pass.
+     * <p>
+     * The reverse of {@link #author(List)}: for a query such as {@code authors { books { title } }}
+     * the engine collects every parent {@link Author} and calls this method once.
+     *
+     * @param authors the list of parent {@link Author} items requested by the GraphQL client
+     * @return a {@link Map} mapping each {@link Author} to its books (an empty list when none)
+     */
+    @BatchMapping(typeName = "Author", field = "books")
+    public Map<Author, List<Book>> books(List<Author> authors) {
+        return catalogService.getBooksForAuthors(authors);
+    }
 }
