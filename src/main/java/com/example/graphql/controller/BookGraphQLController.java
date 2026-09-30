@@ -5,6 +5,7 @@ import com.example.graphql.model.Book;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookInput;
 import com.example.graphql.model.BookSort;
+import com.example.graphql.model.BookUpdateInput;
 import com.example.graphql.repository.CatalogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -137,12 +138,42 @@ public class BookGraphQLController {
     }
 
     /**
+     * Resolves the {@code updateBook(id: ID!, input: BookUpdateInput!)} GraphQL mutation.
+     * Only the fields present in the input are changed.
+     *
+     * @param id    the book ID to update
+     * @param input the partial update containing any of title, pages, price, stock, and author ID
+     * @return the updated {@link Book} entity
+     */
+    @MutationMapping
+    public Book updateBook(@Argument String id, @Argument BookUpdateInput input) {
+        Book book = catalogService.updateBook(id, input);
+        log.info("Mutation 'updateBook' id='{}' -> title='{}' stock={}", id, book.title(), book.stock());
+        return book;
+    }
+
+    /**
+     * Resolves the {@code deleteBook(id: ID!)} GraphQL mutation.
+     *
+     * @param id the book ID to delete
+     * @return {@code true} when the book was removed
+     */
+    @MutationMapping
+    public boolean deleteBook(@Argument String id) {
+        boolean deleted = catalogService.deleteBook(id);
+        log.info("Mutation 'deleteBook' id='{}' -> {}", id, deleted);
+        return deleted;
+    }
+
+    /**
      * Resolves the {@code updateStock(id: ID!, stock: Int!)} GraphQL mutation.
      *
      * @param id    the book ID
      * @param stock the new stock inventory count
      * @return the updated {@link Book} entity
+     * @deprecated use {@code updateBook(id: ID!, input: BookUpdateInput!)} instead
      */
+    @Deprecated
     @MutationMapping
     public Book updateStock(@Argument String id, @Argument int stock) {
         Book book = catalogService.updateStock(id, stock);

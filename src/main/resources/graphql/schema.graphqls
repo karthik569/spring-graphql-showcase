@@ -8,7 +8,9 @@ type Query {
 
 type Mutation {
     addBook(input: BookInput!): Book!
-    updateStock(id: ID!, stock: Int!): Book!
+    updateBook(id: ID!, input: BookUpdateInput!): Book!
+    deleteBook(id: ID!): Boolean!
+    updateStock(id: ID!, stock: Int!): Book! @deprecated(reason: "Use updateBook instead")
 }
 
 type Book {
@@ -33,6 +35,14 @@ input BookInput {
     price: Float!
     stock: Int!
     authorId: ID!
+}
+
+input BookUpdateInput {
+    title: String
+    pages: Int
+    price: Float
+    stock: Int
+    authorId: ID
 }
 
 input BookFilter {

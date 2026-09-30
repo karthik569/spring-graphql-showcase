@@ -1,9 +1,13 @@
 package com.example.graphql.repository;
 
+import com.example.graphql.exception.AuthorNotFoundException;
+import com.example.graphql.exception.BookNotFoundException;
+import com.example.graphql.exception.InvalidBookInputException;
 import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookFilter;
 import com.example.graphql.model.BookSort;
+import com.example.graphql.model.BookUpdateInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -143,19 +147,67 @@ public class CatalogDataService {
     }
 
     public Book saveBook(String title, int pages, double price, int stock, String authorId) {
+        validateBook(title, pages, price, stock, authorId);
         String id = "book-" + (books.size() + 1);
         Book book = new Book(id, title, pages, price, stock, authorId);
         books.put(id, book);
         return book;
     }
 
+    public Book updateBook(String bookId, BookUpdateInput input) {
+        Book existing = books.get(bookId);
+        if (existing == null) {
+            throw new BookNotFoundException(bookId);
+        }
+
+        String title = input.title() != null ? input.title() : existing.title();
+        int pages = input.pages() != null ? input.pages() : existing.pages();
+        double price = input.price() != null ? input.price() : existing.price();
+        int stock = input.stock() != null ? input.stock() : existing.stock();
+        String authorId = input.authorId() != null ? input.authorId() : existing.authorId();
+
+        validateBook(title, pages, price, stock, authorId);
+
+        Book updated = new Book(existing.id(), title, pages, price, stock, authorId);
+        books.put(bookId, updated);
+        return updated;
+    }
+
     public Book updateStock(String bookId, int newStock) {
         Book existing = books.get(bookId);
         if (existing == null) {
-            throw new IllegalArgumentException("Book not found: " + bookId);
+            throw new BookNotFoundException(bookId);
+        }
+        if (newStock < 0) {
+            throw new InvalidBookInputException("stock must not be negative");
         }
         Book updated = new Book(existing.id(), existing.title(), existing.pages(), existing.price(), newStock, existing.authorId());
         books.put(bookId, updated);
         return updated;
+    }
+
+    public boolean deleteBook(String bookId) {
+        if (books.remove(bookId) == null) {
+            throw new BookNotFoundException(bookId);
+        }
+        return true;
+    }
+
+    private void validateBook(String title, int pages, double price, int stock, String authorId) {
+        if (title == null || title.isBlank()) {
+            throw new InvalidBookInputException("title must not be blank");
+        }
+        if (pages <= 0) {
+            throw new InvalidBookInputException("pages must be positive");
+        }
+        if (price < 0) {
+            throw new InvalidBookInputException("price must not be negative");
+        }
+        if (stock < 0) {
+            throw new InvalidBookInputException("stock must not be negative");
+        }
+        if (authorId == null || !authors.containsKey(authorId)) {
+            throw new AuthorNotFoundException(authorId);
+        }
     }
 }
