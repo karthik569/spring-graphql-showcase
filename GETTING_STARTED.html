@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started — Spring for GraphQL Showcase</title>
+<style>
+  :root{
+    --bg:#f5f6fa;
+    --panel:#ffffff;
+    --ink:#0f172a;
+    --muted:#4b5563;
+    --line:#e5e7eb;
+    --brand:#4338ca;
+    --brand-soft:#eef2ff;
+    --accent:#0e7490;
+    --code-bg:#0f172a;
+    --code-ink:#e2e8f0;
+    --ok:#15803d;
+    --ok-soft:#f0fdf4;
+    --warn:#b45309;
+    --warn-soft:#fffbeb;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.65;
+    font-size:16px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
+  header.hero{
+    background:linear-gradient(135deg,#4338ca 0%,#0e7490 100%);
+    color:#fff;
+    padding:44px 20px 38px;
+    margin-bottom:28px;
+  }
+  header.hero .inner{max-width:1080px;margin:0 auto}
+  header.hero .kicker{
+    text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:700;
+    color:#c7d2fe;margin:0 0 8px
+  }
+  header.hero h1{margin:0 0 10px;font-size:32px;line-height:1.2}
+  header.hero p{margin:0;max-width:760px;color:#e0e7ff;font-size:16px}
+  .badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);
+    padding:3px 10px;border-radius:999px;font-size:12.5px;color:#fff}
+  section{padding-top:26px}
+  h2{font-size:23px;margin:34px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:18px;margin:24px 0 8px}
+  h4{font-size:15.5px;margin:18px 0 6px;color:var(--accent)}
+  p{margin:10px 0}
+  a{color:var(--brand)}
+  code{font-family:ui-monospace,SFMono-Regular,"Cascadia Code",Consolas,monospace;font-size:.9em}
+  p code,li code,td code{background:#eef2f7;border:1px solid var(--line);padding:1px 5px;border-radius:5px}
+  pre{
+    background:var(--code-bg);color:var(--code-ink);border-radius:10px;
+    padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.55;
+    border:1px solid #1e293b;
+  }
+  pre code{background:none;border:none;padding:0;color:inherit}
+  .toc{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 22px;box-shadow:0 1px 2px rgba(15,23,42,.04)
+  }
+  .toc h2{margin:0 0 10px;font-size:16px;border:none;padding:0;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .toc ol{margin:0;padding-left:20px;columns:2;column-gap:34px}
+  .toc li{margin:3px 0;break-inside:avoid}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 22px 18px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--brand-soft);font-weight:700}
+  tr:nth-child(even) td{background:#fafbfe}
+  .callout{border-left:5px solid var(--brand);background:var(--brand-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}
+  .callout.warn{border-color:#f59e0b;background:var(--warn-soft)}
+  .callout.ok{border-color:#22c55e;background:var(--ok-soft)}
+  .callout p{margin:4px 0}
+  .callout .label{font-weight:700;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}.toc ol{columns:1}}
+
+  /* ---------- Interactive diagram canvas ---------- */
+  figure.diagram{
+    margin:20px 0;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.05)
+  }
+  figure.diagram figcaption{
+    padding:10px 14px;font-size:13.5px;color:var(--muted);
+    border-bottom:1px solid var(--line);background:#fbfcfe
+  }
+  figure.diagram figcaption strong{color:var(--ink)}
+  .canvas{
+    position:relative;height:min(64vh,520px);min-height:340px;
+    overflow:auto;background:#ffffff;
+    background-image:linear-gradient(#eef1f6 1px,transparent 1px),linear-gradient(90deg,#eef1f6 1px,transparent 1px);
+    background-size:22px 22px;
+    cursor:grab;resize:vertical;
+  }
+  .canvas.grabbing{cursor:grabbing}
+  .canvas::-webkit-scrollbar{width:11px;height:11px}
+  .canvas::-webkit-scrollbar-thumb{background:#c3cbda;border-radius:8px;border:2px solid #fff}
+  .stage{padding:18px;width:max-content;min-width:100%;transform-origin:top left}
+  .stage pre.mermaid{margin:0;padding:0;background:transparent;border:none;color:inherit;overflow:visible}
+  .stage svg{max-width:none !important;height:auto}
+  .toolbar{
+    display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+    padding:8px 10px;border-top:1px solid var(--line);background:#fbfcfe
+  }
+  .toolbar button{
+    font:inherit;font-size:13px;line-height:1;color:var(--ink);background:#fff;
+    border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer
+  }
+  .toolbar button:hover{background:var(--brand-soft);border-color:#c7d2fe}
+  .toolbar button:active{transform:translateY(1px)}
+  .toolbar .readout{font-size:12.5px;color:var(--muted);min-width:44px;text-align:center}
+  .toolbar .hint{margin-left:auto;font-size:12px;color:var(--muted)}
+  .mermaid-error{padding:22px;color:var(--warn);background:var(--warn-soft);font-size:14px}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+  @media print{
+    header.hero{background:#fff;color:#000;border-bottom:2px solid #000}
+    header.hero p,header.hero .kicker,header.hero .badge{color:#000}
+    .toolbar{display:none}
+    .canvas{height:auto;min-height:0;resize:none}
+    figure.diagram{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <p class="kicker">Getting Started</p>
+    <h1>Spring for GraphQL Showcase</h1>
+    <p>A hands-on introduction for developers who are new to <strong>GraphQL</strong> and to this repository. By the end you will have the app running, understand its schema-first design, and know how <code>@BatchMapping</code> removes the N+1 query problem.</p>
+    <div class="badges">
+      <span class="badge">Java 21</span>
+      <span class="badge">Spring Boot 3.3.4</span>
+      <span class="badge">Spring for GraphQL 1.3.2</span>
+      <span class="badge">Maven</span>
+      <span class="badge">Port 8086</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="toc">
+    <h2>What's inside</h2>
+    <ol>
+      <li><a href="#what">What this repo is</a></li>
+      <li><a href="#prereq">Prerequisites</a></li>
+      <li><a href="#quickstart">Five-minute quickstart</a></li>
+      <li><a href="#graphql">GraphQL in two minutes</a></li>
+      <li><a href="#tour">Repo tour</a></li>
+      <li><a href="#arch">Architecture</a></li>
+      <li><a href="#lifecycle">How a query executes</a></li>
+      <li><a href="#nplus1">The N+1 problem and @BatchMapping</a></li>
+      <li><a href="#ops">Operation reference</a></li>
+      <li><a href="#exercises">Hands-on exercises</a></li>
+      <li><a href="#verify">Verifying it works</a></li>
+      <li><a href="#logging">Logging and observability</a></li>
+      <li><a href="#troubleshoot">Troubleshooting</a></li>
+      <li><a href="#next">Where to go next</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+    </ol>
+  </nav>
+
+  <section id="what">
+    <h2>1. What this repo is</h2>
+    <p>This is a small, self-contained <strong>GraphQL server</strong> built with <em>Spring for GraphQL</em>. It serves a tiny book catalog from in-memory maps — there is no database — so you can focus entirely on <em>how GraphQL wiring works in Spring</em>.</p>
+    <p>It deliberately demonstrates three things:</p>
+    <ul>
+      <li><strong>Schema-first design</strong> — the GraphQL contract lives in one file, <code>schema.graphqls</code>, and Java code is written to satisfy it.</li>
+      <li><strong>Queries and mutations</strong> — read operations via <code>@QueryMapping</code>, write operations via <code>@MutationMapping</code>.</li>
+      <li><strong>Batched relationship loading</strong> — <code>@BatchMapping</code> with the GraphQL DataLoader to solve the classic N+1 problem.</li>
+    </ul>
+    <div class="callout">
+      <p class="label">Mental model</p>
+      <p>In REST you design <em>URLs</em>. In GraphQL you design a <em>typed graph</em> and expose a single endpoint (<code>POST /graphql</code>). The client sends a query describing exactly the fields it wants, and the server returns exactly those fields.</p>
+    </div>
+  </section>
+
+  <section id="prereq">
+    <h2>2. Prerequisites</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>Version</th><th>Why</th><th>Check</th></tr></thead>
+      <tbody>
+        <tr><td>JDK</td><td>21 or newer</td><td>The POM targets Java 21. Newer JDKs (e.g. 25) also run it.</td><td><code>java -version</code></td></tr>
+        <tr><td>Maven</td><td>3.8+</td><td>Builds and runs the app.</td><td><code>mvn -v</code></td></tr>
+        <tr><td>curl</td><td>any</td><td>Sending GraphQL requests from the terminal.</td><td><code>curl --version</code></td></tr>
+      </tbody>
+    </table>
+    <p>On Windows, the examples below use <strong>bash</strong> syntax; Git Bash or WSL both work. In PowerShell, replace single-quoted arguments carefully — bash is simpler for the JSON payloads.</p>
+  </section>
+
+  <section id="quickstart">
+    <h2>3. Five-minute quickstart</h2>
+
+    <h3>Step 1 — Build and run the tests</h3>
+    <p>This compiles the code and runs the existing unit test (<code>CatalogDataServiceTest</code>, 3 tests).</p>
+    <pre><code>mvn clean package</code></pre>
+
+    <h3>Step 2 — Start the server</h3>
+    <p>Either of these works. The first uses the packaged jar (already built in Step 1).</p>
+    <pre><code># Option A: run the built jar
+java -jar target/spring-graphql-showcase-1.0.0-SNAPSHOT.jar
+
+# Option B: let Maven run it
+mvn spring-boot:run</code></pre>
+    <p>Wait for this line — it means the server is ready:</p>
+    <pre><code>Started SpringGraphQLApplication in ... seconds
+Tomcat started on port 8086 (http)</code></pre>
+
+    <h3>Step 3 — Confirm it is alive</h3>
+    <pre><code>curl -s http://localhost:8086/actuator/health
+# {"status":"UP"}</code></pre>
+
+    <h3>Step 4 — Run your first query</h3>
+    <pre><code>curl -s -X POST http://localhost:8086/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query { books { id title author { name } } }"}'</code></pre>
+    <p>You should get a <code>data.books</code> array where every book carries its author object.</p>
+
+    <h3>Step 5 — Explore in the browser</h3>
+    <p>Open <a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>. GraphiQL is an interactive IDE: it offers schema autocomplete and a docs pane, so you can build queries by clicking. Paste the same query there and press Run.</p>
+
+    <div class="callout ok">
+      <p class="label">That's it</p>
+      <p>You now have a running GraphQL API. Everything after this section explains <em>why</em> it works the way it does.</p>
+    </div>
+  </section>
+
+  <section id="graphql">
+    <h2>4. GraphQL in two minutes</h2>
+    <p>If you are brand new to GraphQL, five terms carry almost all the weight:</p>
+    <table>
+      <thead><tr><th>Term</th><th>Meaning</th><th>In this repo</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Schema</strong></td><td>The typed contract listing every query, mutation, and object type.</td><td><code>src/main/resources/graphql/schema.graphqls</code></td></tr>
+        <tr><td><strong>Query</strong></td><td>A read operation, like GET in REST.</td><td><code>books</code>, <code>bookById</code>, <code>authors</code>, <code>authorById</code></td></tr>
+        <tr><td><strong>Mutation</strong></td><td>A write operation, like POST/PUT in REST.</td><td><code>addBook</code>, <code>updateStock</code></td></tr>
+        <tr><td><strong>Resolver</strong></td><td>The Java method that produces data for a schema field.</td><td>Methods in <code>BookGraphQLController</code></td></tr>
+        <tr><td><strong>Field selection</strong></td><td>The client lists the exact fields it wants; the server returns only those.</td><td><code>books { id title }</code> returns no price or author</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Schema-first</strong> means the <code>.graphqls</code> file is the source of truth. Spring parses it at startup; if a schema field has no matching resolver, Spring logs it. You will see this startup report:</p>
+    <pre><code>GraphQL schema inspection:
+    Unmapped fields: {}
+    Unmapped registrations: {}
+    Unmapped arguments: {}</code></pre>
+    <p>Empty maps mean every schema field is wired to a resolver — a fast, useful sanity check after you edit the schema.</p>
+  </section>
+
+  <section id="tour">
+    <h2>5. Repo tour</h2>
+    <pre><code>spring-graphql-showcase/
++-- pom.xml                                  # Maven build; Java 21, Spring Boot 3.3.4
++-- README.md                                # short overview
++-- ARCHITECTURE_AND_METHODS.md              # deeper method-by-method notes
++-- GETTING_STARTED.html                     # this guide
++-- src/
+    +-- main/
+    |   +-- java/com/example/graphql/
+    |   |   +-- SpringGraphQLApplication.java        # main() entry point
+    |   |   +-- controller/BookGraphQLController.java# @QueryMapping / @MutationMapping / @BatchMapping
+    |   |   +-- repository/CatalogDataService.java   # in-memory data + bulk author lookup
+    |   |   +-- model/Book.java                      # record
+    |   |   +-- model/Author.java                    # record
+    |   |   +-- model/BookInput.java                 # record used by the addBook mutation
+    |   +-- resources/
+    |       +-- application.yml                      # port 8086, GraphiQL, logging
+    |       +-- graphql/schema.graphqls              # the GraphQL contract
+    +-- test/java/com/example/graphql/CatalogDataServiceTest.java</code></pre>
+
+    <div class="grid">
+      <div class="card">
+        <h4>BookGraphQLController</h4>
+        <p>Thin adapter between the GraphQL engine and the data service. One method per schema operation, each annotated with <code>@QueryMapping</code>, <code>@MutationMapping</code>, or <code>@BatchMapping</code>.</p>
+      </div>
+      <div class="card">
+        <h4>CatalogDataService</h4>
+        <p>Holds two <code>ConcurrentHashMap</code>s seeded with 4 books and 3 authors. Provides CRUD-ish helpers plus <code>getAuthorsForBooks(List&lt;Book&gt;)</code>, the bulk lookup used by batching.</p>
+      </div>
+      <div class="card">
+        <h4>schema.graphqls</h4>
+        <p>The typed contract: <code>Query</code>, <code>Mutation</code>, <code>Book</code>, <code>Author</code>, and the <code>BookInput</code> input type.</p>
+      </div>
+      <div class="card">
+        <h4>application.yml</h4>
+        <p>Sets <code>server.port: 8086</code>, enables GraphiQL at <code>/graphiql</code>, allows CORS, exposes actuator endpoints, and configures logging levels/patterns and a log file.</p>
+      </div>
+    </div>
+
+    <h3>Seed data</h3>
+    <p>The app starts with these records in memory (so you have something to query immediately):</p>
+    <table>
+      <thead><tr><th>Book ID</th><th>Title</th><th>Pages</th><th>Price</th><th>Stock</th><th>Author ID</th></tr></thead>
+      <tbody>
+        <tr><td>book-1</td><td>Effective Java</td><td>416</td><td>45.0</td><td>50</td><td>author-1</td></tr>
+        <tr><td>book-2</td><td>Refactoring</td><td>448</td><td>55.0</td><td>30</td><td>author-2</td></tr>
+        <tr><td>book-3</td><td>Clean Code</td><td>464</td><td>40.0</td><td>75</td><td>author-3</td></tr>
+        <tr><td>book-4</td><td>Java Puzzlers</td><td>312</td><td>35.0</td><td>20</td><td>author-1</td></tr>
+      </tbody>
+    </table>
+    <p>Authors: <code>author-1</code> Joshua Bloch (USA), <code>author-2</code> Martin Fowler (UK), <code>author-3</code> Robert C. Martin (USA).</p>
+  </section>
+
+  <section id="arch">
+    <h2>6. Architecture</h2>
+    <p>One HTTP endpoint, one controller, one in-memory service. The arrow you should study is the <code>@BatchMapping</code> one — it is the reason this repo exists.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Component view</strong> — how a request travels from client to the in-memory stores.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+flowchart TB
+  Client["GraphQL Client / GraphiQL IDE (localhost:8086/graphiql)"]
+  Http["Spring MVC endpoint POST /graphql"]
+  Engine["Spring for GraphQL Engine"]
+  Controller["BookGraphQLController"]
+  Service["CatalogDataService (in-memory)"]
+  BooksStore["books Map"]
+  AuthorsStore["authors Map"]
+
+  Client -->|"HTTP JSON request"| Http
+  Http --> Engine
+  Engine -->|"@QueryMapping and @MutationMapping"| Controller
+  Controller -->|"plain method call"| Service
+  Controller -->|"@BatchMapping author(books)"| Service
+  Service --> BooksStore
+  Service --> AuthorsStore
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+  </section>
+
+  <section id="lifecycle">
+    <h2>7. How a query executes</h2>
+    <p>Take the query that joins books to authors:</p>
+    <pre><code>query { books { id title author { name } } }</code></pre>
+    <p>Notice that <code>books()</code> is called <em>once</em>, and <code>author(...)</code> is also called <em>once</em> — with the whole list of books, not one at a time. That second call is the <code>@BatchMapping</code>.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>Sequence view</strong> — one request, one <code>books()</code> call, one batched <code>author()</code> call.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as GraphQL Client
+  participant E as Spring for GraphQL Engine
+  participant Q as BookGraphQLController.books()
+  participant B as BookGraphQLController.author() @BatchMapping
+  participant S as CatalogDataService
+
+  C->>E: POST /graphql  query books with author
+  E->>Q: books()
+  Q->>S: getAllBooks()
+  S-->>Q: List of 4 books
+  Q-->>E: 4 Book objects
+  Note over E,B: Engine resolves scalar fields, then defers author and collects ALL parent Books
+  E->>B: author(List of 4 books) called ONCE
+  B->>S: getAuthorsForBooks(4 books)
+  S-->>B: Map Book to Author in a single bulk lookup
+  B-->>E: authors for every book
+  E-->>C: JSON with books and nested authors
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+  </section>
+
+  <section id="nplus1">
+    <h2>8. The N+1 problem and @BatchMapping</h2>
+    <p><strong>N+1</strong> is the classic GraphQL performance trap. When a client asks for a list plus a nested relationship, a naive resolver runs one query to fetch the list, then one <em>more</em> query per item to fetch each relationship: <code>1 + N</code> lookups. For 1,000 books that is 1,001 round-trips.</p>
+
+    <p>Here is the naive shape, for contrast:</p>
+    <figure class="diagram">
+      <figcaption><strong>Without batching</strong> — the resolver runs once per book, so lookups grow with N.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  participant C as GraphQL Client
+  participant E as GraphQL Engine
+  participant R as Per-book author resolver
+
+  C->>E: books with author
+  loop once per book (N times)
+    E->>R: resolve author for this book
+    R-->>E: that book's author
+  end
+  Note over E,R: total lookups = 1 for books + N for authors
+  E-->>C: response
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <p>This repo replaces the per-item resolver with a single <code>@BatchMapping</code>. Spring for GraphQL collects every parent <code>Book</code> in the current request and calls your method once with the whole list. The DataLoader machinery lives behind that annotation.</p>
+
+    <figure class="diagram">
+      <figcaption><strong>With @BatchMapping</strong> — one call regardless of how many books you request.</figcaption>
+      <div class="canvas"><div class="stage">
+        <pre class="mermaid">
+sequenceDiagram
+  participant C as GraphQL Client
+  participant E as GraphQL Engine
+  participant D as DataLoader via @BatchMapping
+
+  C->>E: books with author
+  E->>D: author(List of all books) called ONCE
+  D-->>E: Map Book to Author from one bulk lookup
+  Note over E,D: total lookups = 1 for books + 1 batched for authors
+  E-->>C: response
+        </pre>
+      </div>
+      <div class="toolbar"></div>
+      </div>
+    </figure>
+
+    <h3>The code that does it</h3>
+    <pre><code>@BatchMapping(typeName = "Book", field = "author")
+public Map&lt;Book, Author&gt; author(List&lt;Book&gt; books) {
+    return catalogService.getAuthorsForBooks(books);
+}</code></pre>
+    <p>Two details make it click:</p>
+    <ul>
+      <li>The method receives <code>List&lt;Book&gt;</code> — the batch — not a single book.</li>
+      <li>It returns <code>Map&lt;Book, Author&gt;</code>, letting the engine map each result back to the right parent object.</li>
+    </ul>
+    <p>The service then performs the whole lookup in one pass:</p>
+    <pre><code>public Map&lt;Book, Author&gt; getAuthorsForBooks(List&lt;Book&gt; bookList) {
+    log.info("[GRAPHQL-BATCH-MAPPING] Batch loading authors for {} books in a SINGLE operation (Preventing N+1!)",
+            bookList.size());
+    // ... one loop over bookList, reading each author from the in-memory map
+}</code></pre>
+    <div class="callout">
+      <p class="label">How to prove it at runtime</p>
+      <p>Request books with authors, then look for the log line. Exactly one line appears, no matter how many books exist: <code>[GRAPHQL-BATCH-MAPPING] Batch loading authors for 4 books in a SINGLE operation</code>. That log statement is your observable evidence that batching happened.</p>
+    </div>
+  </section>
+
+  <section id="ops">
+    <h2>9. Operation reference</h2>
+    <p>Every operation in the schema, its signature, and a ready-to-run example. The schema in <code>schema.graphqls</code> is always the authoritative version if anything here drifts.</p>
+
+    <h3>Queries</h3>
+    <table>
+      <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
+      <tbody>
+        <tr><td><code>books</code></td><td><code>books: [Book!]!</code></td><td><code>books()</code></td></tr>
+        <tr><td><code>bookById</code></td><td><code>bookById(id: ID!): Book</code></td><td><code>bookById(String id)</code></td></tr>
+        <tr><td><code>authors</code></td><td><code>authors: [Author!]!</code></td><td><code>authors()</code></td></tr>
+        <tr><td><code>authorById</code></td><td><code>authorById(id: ID!): Author</code></td><td><code>authorById(String id)</code></td></tr>
+      </tbody>
+    </table>
+    <pre><code># All books, each with its author (triggers the batched loader)
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { books { id title pages author { name } } }"}'
+
+# One book by ID
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { bookById(id: \"book-1\") { id title author { name } } }"}'
+
+# All authors
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { authors { id name country } }"}'</code></pre>
+    <p>Inside the <code>-d</code> JSON, GraphQL string arguments need escaped quotes: <code>\"book-1\"</code>. That escaping is the only fiddly part of calling GraphQL from a shell.</p>
+
+    <h3>Mutations</h3>
+    <table>
+      <thead><tr><th>Operation</th><th>Signature</th><th>Resolved by</th></tr></thead>
+      <tbody>
+        <tr><td><code>addBook</code></td><td><code>addBook(input: BookInput!): Book!</code></td><td><code>addBook(BookInput input)</code></td></tr>
+        <tr><td><code>updateStock</code></td><td><code>updateStock(id: ID!, stock: Int!): Book!</code></td><td><code>updateStock(String id, int stock)</code></td></tr>
+      </tbody>
+    </table>
+    <p><code>BookInput</code> is an <strong>input type</strong> — the GraphQL way to pass a group of arguments:</p>
+    <pre><code>input BookInput {
+    title: String!
+    pages: Int!
+    price: Float!
+    stock: Int!
+    authorId: ID!
+}</code></pre>
+    <pre><code># Create a book (input object)
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"mutation { addBook(input: {title: \"Cloud Native Java\", pages: 450, price: 59.0, stock: 12, authorId: \"author-1\"}) { id title stock author { name } } }"}'
+
+# Update stock
+curl -s -X POST http://localhost:8086/graphql -H "Content-Type: application/json" \
+  -d '{"query":"mutation { updateStock(id: \"book-2\", stock: 99) { id title stock } }"}'</code></pre>
+    <div class="callout warn">
+      <p class="label">Accuracy note</p>
+      <p><code>README.md</code>'s mutation example predates the current schema and calls <code>addBook(title: ..., pages: ..., authorId: ...)</code> as flat arguments. The schema now requires the nested <code>input: BookInput!</code> form shown above — use that.</p>
+    </div>
+  </section>
+
+  <section id="exercises">
+    <h2>10. Hands-on exercises</h2>
+    <p>Try these in GraphiQL (<a href="http://localhost:8086/graphiql" target="_blank" rel="noopener">http://localhost:8086/graphiql</a>) — it gives you autocomplete and error highlighting.</p>
+    <ol>
+      <li><strong>Field selection.</strong> Query only <code>books { title }</code>, then only <code>books { title price }</code>. Notice the response changes shape with the request. That is GraphQL's core promise over REST.</li>
+      <li><strong>Null handling.</strong> Run <code>bookById(id: "does-not-exist") { id title }</code>. It returns <code>{"data":{"bookById":null}}</code> — a nullable field simply returns null, without an HTTP error.</li>
+      <li><strong>Create then read.</strong> Run the <code>addBook</code> mutation, note the returned ID, then query <code>bookById</code> for that ID. The new book is in memory for the lifetime of the process.</li>
+      <li><strong>Error path.</strong> Run <code>updateStock(id: "book-999", stock: 1)</code>. The service throws <code>IllegalArgumentException</code>, and GraphQL returns an <code>errors</code> array instead of <code>data</code>.</li>
+      <li><strong>Watch the batching.</strong> Call <code>books { title author { name } }</code> and immediately check the console or the log file for a single <code>GRAPHQL-BATCH-MAPPING</code> line.</li>
+      <li><strong>Extend the schema.</strong> Add a <code>deleteBook(id: ID!): Boolean!</code> mutation: edit <code>schema.graphqls</code>, add a service method, and add a <code>@MutationMapping</code>. Restart and confirm the startup inspection shows <code>Unmapped fields: {}</code>.</li>
+    </ol>
+  </section>
+
+  <section id="verify">
+    <h2>11. Verifying it works</h2>
+    <p>After starting the app, verify in layers — cheapest first:</p>
+    <table>
+      <thead><tr><th>Check</th><th>Command / action</th><th>Expected</th></tr></thead>
+      <tbody>
+        <tr><td>Server is up</td><td><code>curl -s localhost:8086/actuator/health</code></td><td><code>{"status":"UP"}</code></td></tr>
+        <tr><td>Schema fully wired</td><td>Inspect the startup log</td><td><code>Unmapped fields: {}</code></td></tr>
+        <tr><td>Reads work</td><td>POST <code>books</code>, <code>bookById</code>, <code>authors</code>, <code>authorById</code></td><td><code>data</code> present, no <code>errors</code></td></tr>
+        <tr><td>Writes work</td><td>POST <code>addBook</code>, then read it back</td><td>The new book is returned and queryable</td></tr>
+        <tr><td>Errors are handled</td><td>POST <code>updateStock</code> with a bad ID</td><td>An <code>errors</code> array, not a crash</td></tr>
+        <tr><td>N+1 is solved</td><td>Query <code>books { author { name } }</code>, check the log</td><td>Exactly one <code>GRAPHQL-BATCH-MAPPING</code> line</td></tr>
+        <tr><td>Data layer unit tests</td><td><code>mvn test</code></td><td>Tests run: 3, Failures: 0, Errors: 0</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <p class="label">Why this layering matters</p>
+      <p>Correct output alone does not prove the batching works — a naive resolver would return identical JSON. Only the log line distinguishes "correct and efficient" from "correct but N+1". Assert on behavior, not just payloads.</p>
+    </div>
+  </section>
+
+  <section id="logging">
+    <h2>12. Logging and observability</h2>
+    <p>The app logs through <strong>SLF4J + Logback</strong> (Logback comes in with <code>spring-boot-starter-web</code>). Configuration lives in <code>application.yml</code>:</p>
+    <pre><code>logging:
+  level:
+    root: INFO
+    com.example.graphql: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+  file:
+    name: logs/spring-graphql-showcase.log</code></pre>
+    <p>Output goes both to the console and to <code>logs/spring-graphql-showcase.log</code> (the <code>*.log</code> pattern is git-ignored). Every resolver logs its operation, so a single request is easy to trace:</p>
+    <pre><code>Query 'books' -> returning 4 book(s)
+Query 'bookById' id='book-1' -> Effective Java
+Mutation 'addBook' title='Logging Demo' authorId='author-3' -> created id='book-5'
+Mutation 'updateStock' id='book-1' stock=123 -> updated
+[GRAPHQL-BATCH-MAPPING] Batch loading authors for 4 books in a SINGLE operation (Preventing N+1!)</code></pre>
+    <p>To follow the file live while you experiment:</p>
+    <pre><code>tail -f logs/spring-graphql-showcase.log</code></pre>
+  </section>
+
+  <section id="troubleshoot">
+    <h2>13. Troubleshooting</h2>
+    <table>
+      <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><code>Port 8086 was already in use</code></td><td>Another instance is still running.</td><td>Stop it, or change <code>server.port</code> in <code>application.yml</code>. On Windows: <code>netstat -ano | findstr :8086</code>, then <code>taskkill /PID &lt;pid&gt; /F</code>.</td></tr>
+        <tr><td><code>release version 21 not supported</code></td><td>An older JDK is active.</td><td>Install JDK 21+ and point <code>JAVA_HOME</code> at it. Verify with <code>java -version</code>.</td></tr>
+        <tr><td><code>/bin/bash: No such file or directory</code> on Windows</td><td><code>bash</code> resolves to the WSL stub with no distro installed.</td><td>Use Git Bash explicitly, e.g. <code>"C:\Program Files\Git\bin\bash.exe" -lc "mvn spring-boot:run"</code>.</td></tr>
+        <tr><td>GraphiQL shows a blank page</td><td>Wrong path or the app is not up yet.</td><td>Use exactly <code>http://localhost:8086/graphiql</code> after the "Started" log line.</td></tr>
+        <tr><td>Validation error on a mutation</td><td>Arguments do not match the schema.</td><td>Compare against <code>schema.graphqls</code>; remember <code>addBook</code> takes a nested <code>input</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="next">
+    <h2>14. Where to go next</h2>
+    <ul>
+      <li><strong>Read the schema first.</strong> <code>src/main/resources/graphql/schema.graphqls</code> is 30 lines and defines the entire API surface.</li>
+      <li><strong>Follow one request end to end.</strong> Start in <code>BookGraphQLController</code>, then read the matching method in <code>CatalogDataService</code>.</li>
+      <li><strong>Go deeper on methods.</strong> <code>ARCHITECTURE_AND_METHODS.md</code> explains each method in more detail.</li>
+      <li><strong>Know the limitations.</strong> This is a teaching app: storage is in memory (data resets on restart), <code>getAllBooks()</code> returns map values so ordering is not guaranteed, and <code>saveBook</code> derives IDs from map size, which can collide in more complex scenarios.</li>
+      <li><strong>Next real-world steps.</strong> Persist to a database, add pagination for <code>books</code>, introduce a <code>Book.author</code> field with a <code>@SchemaMapping</code>, and add integration tests with <code>GraphQlTester</code> from <code>spring-graphql-test</code>.</li>
+    </ul>
+  </section>
+
+  <section id="glossary">
+    <h2>15. Glossary</h2>
+    <table>
+      <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+      <tbody>
+        <tr><td><strong>GraphQL</strong></td><td>A query language and runtime for APIs where clients request exactly the fields they need from a typed graph.</td></tr>
+        <tr><td><strong>Schema-first</strong></td><td>Defining the GraphQL contract in a schema file first, then implementing resolvers to satisfy it.</td></tr>
+        <tr><td><strong>Resolver</strong></td><td>A method that supplies data for a schema field.</td></tr>
+        <tr><td><strong>@QueryMapping</strong></td><td>Spring for GraphQL annotation binding a method to a read operation in the <code>Query</code> type.</td></tr>
+        <tr><td><strong>@MutationMapping</strong></td><td>The same idea for the <code>Mutation</code> type (writes).</td></tr>
+        <tr><td><strong>@BatchMapping</strong></td><td>Binds a method that resolves a field for many parent objects at once, enabling batched loading.</td></tr>
+        <tr><td><strong>DataLoader</strong></td><td>A batching-and-caching mechanism (from graphql-java) that collects individual field requests within a request and issues one batch.</td></tr>
+        <tr><td><strong>N+1 problem</strong></td><td>Executing one query for a list plus one query per item for a nested field, producing 1+N round-trips.</td></tr>
+        <tr><td><strong>GraphiQL</strong></td><td>An in-browser IDE for exploring and running GraphQL operations.</td></tr>
+        <tr><td><strong>Input type</strong></td><td>A schema type used to pass structured arguments into a mutation, e.g. <code>BookInput</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <p>Spring for GraphQL Showcase — getting started guide. Diagrams render with Mermaid; the schema in <code>schema.graphqls</code> is the authoritative API contract.</p>
+  </footer>
+</div>
+
+<script type="module">
+  const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  async function boot() {
+    let mermaid;
+    try {
+      mermaid = (await import(MERMAID_CDN)).default;
+    } catch (err) {
+      document.querySelectorAll('.mermaid').forEach(function (el) {
+        el.innerHTML = '<div class="mermaid-error">The diagram renderer could not load (no internet access to the CDN). Open this file with a network connection to render the Mermaid diagrams.</div>';
+      });
+      document.querySelectorAll('.toolbar').forEach(function (t) { t.remove(); });
+      return;
+    }
+
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'base',
+      themeVariables: {
+        fontFamily: 'ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+        fontSize: '15px',
+        background: '#ffffff',
+        primaryColor: '#eef2ff',
+        primaryBorderColor: '#4338ca',
+        primaryTextColor: '#0f172a',
+        secondaryColor: '#ecfeff',
+        secondaryBorderColor: '#0e7490',
+        tertiaryColor: '#f8fafc',
+        tertiaryBorderColor: '#94a3b8',
+        lineColor: '#334155',
+        textColor: '#0f172a',
+        noteBkgColor: '#fef9c3',
+        noteTextColor: '#0f172a',
+        noteBorderColor: '#ca8a04',
+        actorBkg: '#eef2ff',
+        actorBorder: '#4338ca',
+        actorTextColor: '#0f172a',
+        actorLineColor: '#64748b',
+        signalColor: '#0f172a',
+        signalTextColor: '#0f172a',
+        labelBoxBkgColor: '#eef2ff',
+        labelBoxBorderColor: '#4338ca',
+        labelTextColor: '#0f172a',
+        loopTextColor: '#0f172a',
+        activationBkgColor: '#c7d2fe',
+        activationBorderColor: '#4338ca'
+      },
+      flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' },
+      sequence: { useMaxWidth: false, wrap: false, mirrorActors: false }
+    });
+
+    await mermaid.run({ querySelector: '.mermaid' });
+    document.querySelectorAll('figure.diagram').forEach(enhance);
+  }
+
+  function enhance(figure) {
+    const canvas = figure.querySelector('.canvas');
+    const stage = figure.querySelector('.stage');
+    const toolbar = figure.querySelector('.toolbar');
+    const MIN = 0.3, MAX = 5;
+    let zoom = 1;
+
+    const readout = document.createElement('span');
+    readout.className = 'readout';
+
+    function btn(label, title, onClick) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', onClick);
+      return b;
+    }
+
+    function clamp(v) { return Math.min(MAX, Math.max(MIN, v)); }
+
+    function setZoom(next, clientX, clientY) {
+      next = clamp(next);
+      if (Math.abs(next - zoom) < 0.001) return;
+      const rect = canvas.getBoundingClientRect();
+      const ax = clientX == null ? rect.width / 2 : clientX - rect.left;
+      const ay = clientY == null ? rect.height / 2 : clientY - rect.top;
+      const oldW = canvas.scrollWidth || 1;
+      const oldH = canvas.scrollHeight || 1;
+      const fx = (canvas.scrollLeft + ax) / oldW;
+      const fy = (canvas.scrollTop + ay) / oldH;
+      zoom = next;
+      stage.style.zoom = zoom;
+      const newW = canvas.scrollWidth;
+      const newH = canvas.scrollHeight;
+      canvas.scrollLeft = fx * newW - ax;
+      canvas.scrollTop = fy * newH - ay;
+      readout.textContent = Math.round(zoom * 100) + '%';
+    }
+
+    function reset() {
+      zoom = 1;
+      stage.style.zoom = 1;
+      canvas.scrollLeft = 0;
+      canvas.scrollTop = 0;
+      readout.textContent = '100%';
+    }
+
+    toolbar.appendChild(btn('-', 'Zoom out', function () { setZoom(zoom / 1.2); }));
+    toolbar.appendChild(btn('+', 'Zoom in', function () { setZoom(zoom * 1.2); }));
+    toolbar.appendChild(btn('Reset', 'Reset zoom and position', reset));
+    toolbar.appendChild(btn('\u26F6 Fullscreen', 'Toggle fullscreen', function () {
+      if (document.fullscreenElement) { document.exitFullscreen(); }
+      else if (canvas.requestFullscreen) { canvas.requestFullscreen(); }
+    }));
+    toolbar.appendChild(readout);
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.textContent = 'Drag to pan \u00B7 Ctrl+scroll to zoom';
+    toolbar.appendChild(hint);
+    readout.textContent = '100%';
+
+    canvas.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
+    }, { passive: false });
+
+    let dragging = false, startX = 0, startY = 0, startL = 0, startT = 0;
+    canvas.addEventListener('mousedown', function (e) {
+      if (e.button !== 0 || e.target.closest('.toolbar')) return;
+      dragging = true;
+      canvas.classList.add('grabbing');
+      startX = e.clientX; startY = e.clientY;
+      startL = canvas.scrollLeft; startT = canvas.scrollTop;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      canvas.scrollLeft = startL - (e.clientX - startX);
+      canvas.scrollTop = startT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function () {
+      dragging = false;
+      canvas.classList.remove('grabbing');
+    });
+  }
+
+  boot();
+</script>
+</body>
+</html>

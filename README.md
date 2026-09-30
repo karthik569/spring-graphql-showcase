@@ -2,6 +2,8 @@
 
 A production-grade GraphQL server implementing **Schema-First Design**, `@QueryMapping`, `@MutationMapping`, and `@BatchMapping` with DataLoader to eliminate the $N+1$ query problem.
 
+> 📖 **New to Spring GraphQL or this repo?** Start with the [Getting Started guide](GETTING_STARTED.html).
+
 ---
 
 ## 🌟 Comprehensive Method-by-Method Breakdown

@@ -4,6 +4,8 @@ import com.example.graphql.model.Author;
 import com.example.graphql.model.Book;
 import com.example.graphql.model.BookInput;
 import com.example.graphql.repository.CatalogDataService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.MutationMapping;
@@ -30,6 +32,8 @@ import java.util.Optional;
 @Controller
 public class BookGraphQLController {
 
+    private static final Logger log = LoggerFactory.getLogger(BookGraphQLController.class);
+
     private final CatalogDataService catalogService;
 
     /**
@@ -48,7 +52,9 @@ public class BookGraphQLController {
      */
     @QueryMapping
     public List<Book> books() {
-        return catalogService.getAllBooks();
+        List<Book> books = catalogService.getAllBooks();
+        log.info("Query 'books' -> returning {} book(s)", books.size());
+        return books;
     }
 
     /**
@@ -59,7 +65,9 @@ public class BookGraphQLController {
      */
     @QueryMapping
     public Optional<Book> bookById(@Argument String id) {
-        return catalogService.getBookById(id);
+        Optional<Book> book = catalogService.getBookById(id);
+        log.info("Query 'bookById' id='{}' -> {}", id, book.map(Book::title).orElse("not found"));
+        return book;
     }
 
     /**
@@ -69,7 +77,9 @@ public class BookGraphQLController {
      */
     @QueryMapping
     public List<Author> authors() {
-        return catalogService.getAllAuthors();
+        List<Author> authors = catalogService.getAllAuthors();
+        log.info("Query 'authors' -> returning {} author(s)", authors.size());
+        return authors;
     }
 
     /**
@@ -80,7 +90,9 @@ public class BookGraphQLController {
      */
     @QueryMapping
     public Optional<Author> authorById(@Argument String id) {
-        return catalogService.getAuthorById(id);
+        Optional<Author> author = catalogService.getAuthorById(id);
+        log.info("Query 'authorById' id='{}' -> {}", id, author.map(Author::name).orElse("not found"));
+        return author;
     }
 
     /**
@@ -91,13 +103,16 @@ public class BookGraphQLController {
      */
     @MutationMapping
     public Book addBook(@Argument BookInput input) {
-        return catalogService.saveBook(
+        Book book = catalogService.saveBook(
                 input.title(),
                 input.pages(),
                 input.price(),
                 input.stock(),
                 input.authorId()
         );
+        log.info("Mutation 'addBook' title='{}' authorId='{}' -> created id='{}'",
+                book.title(), book.authorId(), book.id());
+        return book;
     }
 
     /**
@@ -109,7 +124,9 @@ public class BookGraphQLController {
      */
     @MutationMapping
     public Book updateStock(@Argument String id, @Argument int stock) {
-        return catalogService.updateStock(id, stock);
+        Book book = catalogService.updateStock(id, stock);
+        log.info("Mutation 'updateStock' id='{}' stock={} -> updated", id, stock);
+        return book;
     }
 
     /**
